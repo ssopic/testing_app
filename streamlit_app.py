@@ -435,7 +435,8 @@ def screen_extraction():
             return
             
         # Pipeline
-        pipeline = GraphRAGPipeline(driver, llm, st.session_state.schema_stats)
+        # FIX: Access schema_stats from app_state
+        pipeline = GraphRAGPipeline(driver, llm, st.session_state.app_state["schema_stats"])
 
         # Chat UI
         for chat in st.session_state.chat_history:
@@ -469,8 +470,6 @@ def screen_extraction():
         
         if st.button("Run Query"):
             # A. Security Check
-            # Ensure SAFETY_REGEX is defined at the top of your file:
-            # SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
             if SAFETY_REGEX.search(cypher_input):
                 st.error("🚨 SECURITY ALERT: destructive commands (DELETE, MERGE, etc.) are not allowed.")
             else:
@@ -491,7 +490,6 @@ def screen_extraction():
                                 st.warning("Query returned no results.")
                     except Exception as e:
                         st.error(f"Cypher Syntax Error: {e}")
-
 # FRAGMENT: Locker interaction updates independently
 @st.fragment
 def screen_locker():
