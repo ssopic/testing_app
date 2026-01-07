@@ -304,10 +304,22 @@ class GraphRAGPipeline:
                     with self.driver.session() as session:
                         res_obj = session.run(raw_cypher)
                         records = [r.data() for r in res_obj]
+                        
                         # Capture notifications/warnings if available
                         summary = res_obj.consume()
                         if summary.notifications:
-                             attempt_log["warnings"] = [{"code": n.code, "message": n.description} for n in summary.notifications]
+                             # FIX: Robust warning handling (Dict vs Object)
+                             warnings = []
+                             for n in summary.notifications:
+                                 # Handle Neo4j driver returning dicts instead of objects
+                                 if isinstance(n, dict):
+                                     code = n.get("code", "UNKNOWN")
+                                     msg = n.get("description", "No description")
+                                 else:
+                                     code = getattr(n, "code", "UNKNOWN")
+                                     msg = getattr(n, "description", "No description")
+                                 warnings.append({"code": code, "message": msg})
+                             attempt_log["warnings"] = warnings
                         
                         results = records
                         attempt_log["status"] = "SUCCESS"
@@ -329,6 +341,25 @@ class GraphRAGPipeline:
                         else: break
                     else: raise e
 
+            # 6. Synthesis
+            pipeline_object["raw_results"] = results
+            pipeline_object["proof_ids"] = extract_provenance_from_result(results) # Internal utility
+            
+            if not results:
+                pipeline_object["final_answer"] = "No information found."
+            else:
+                synth = self._run_agent("Synthesizer", SynthesisOutput, {
+                    "user_query": user_query, "final_cypher": raw_cypher, "db_result": results[:50]
+                })
+                pipeline_object["final_answer"] = synth.final_answer
+            
+            pipeline_object["status"] = "SUCCESS"
+
+        except Exception as e:
+            pipeline_object["status"] = "ERROR"
+            pipeline_object["error"] = str(e)
+            
+        return pipeline_object
             # 6. Synthesis
             pipeline_object["raw_results"] = results
             pipeline_object["proof_ids"] = extract_provenance_from_result(results) # Internal utility
