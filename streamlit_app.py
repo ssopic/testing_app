@@ -386,32 +386,73 @@ def screen_connection():
 @st.fragment
 def screen_databook():
     st.title("📚 The Databook")
+    # FIX: Access schema_stats from app_state
     stats = st.session_state.app_state["schema_stats"]
-    search = st.text_input("Fuzzy Filter Labels")
     
-    col_n, col_r = st.columns(2)
-    with col_n:
+    if stats.get("status") != "SUCCESS":
+        st.error("Failed to load schema.")
+        return
+
+    # Unified Filter for both columns
+    filter_text = st.text_input("Filter Labels & Types", placeholder="e.g. Person")
+
+    col_nodes, col_rels = st.columns(2)
+
+    # --- LEFT COLUMN: NODES (Advanced Features) ---
+    with col_nodes:
         st.subheader("Nodes")
         labels = stats.get("NodeLabels", [])
-        if search: labels = difflib.get_close_matches(search, labels, n=10, cutoff=0.3)
+        if filter_text:
+            labels = [l for l in labels if filter_text.lower() in l.lower()]
         
         for label in labels:
-            with st.expander(f"{label} ({stats['NodeCounts'].get(label, 0)})"):
-                st.write("**Properties:**", stats["NodeProperties"].get(label, []))
-                if st.button(f"Preview {label}", key=f"p_{label}"):
-                    # Use CACHED driver
+            count = stats["NodeCounts"].get(label, 0)
+            with st.expander(f"📦 {label} ({count:,})"):
+                st.caption(f"Properties: {', '.join(stats['NodeProperties'].get(label, [])[:5])}...")
+                
+                # --- ADVANCED SHOWCASING RESTORED ---
+                # 1. Search Bar specific to this node type
+                node_search = st.text_input(f"Search {label}", key=f"s_{label}", placeholder="Value to find...")
+                limit = st.selectbox("Limit", [5, 10, 50], key=f"l_{label}")
+                
+                if st.button(f"Fetch Data", key=f"b_{label}"):
+                    # FIX: Credentials from app_state
                     creds = st.session_state.app_state["neo4j_creds"]
                     driver = get_cached_driver(creds["uri"], creds["auth"])
-                    with driver.session() as s:
-                        st.json([r.data() for r in s.run(f"MATCH (n:`{label}`) RETURN n LIMIT 3")])
+                    
+                    if driver:
+                        with driver.session() as session:
+                            if node_search:
+                                # Advanced Query: Search ANY property for the term
+                                query = f"""
+                                MATCH (n:`{label}`) 
+                                WHERE any(prop in keys(n) WHERE toString(n[prop]) CONTAINS $term)
+                                RETURN n LIMIT toInteger($limit)
+                                """
+                                params = {"term": node_search, "limit": limit}
+                            else:
+                                # Standard Fetch
+                                query = f"MATCH (n:`{label}`) RETURN n LIMIT toInteger($limit)"
+                                params = {"limit": limit}
+                            
+                            results = session.run(query, params)
+                            data = [r["n"] for r in results]
+                            
+                            if data:
+                                # Render as interactive Table
+                                st.dataframe(pd.DataFrame(data), use_container_width=True)
+                            else:
+                                st.info("No results found.")
 
-    with col_r:
+    # --- RIGHT COLUMN: RELATIONSHIPS ---
+    with col_rels:
         st.subheader("Relationships")
         rels = stats.get("RelationshipTypes", [])
-        if search: rels = difflib.get_close_matches(search, rels, n=10, cutoff=0.3)
-        
+        if filter_text:
+            rels = [r for r in rels if filter_text.lower() in r.lower()]
+            
         for rtype in rels:
-            with st.expander(rtype):
+            with st.expander(f"🔗 {rtype}"):
                 st.write("**Verbs:**", stats["RelationshipVerbs"].get(rtype, []))
                 st.write("**Properties:**", stats["RelationshipProperties"].get(rtype, []))
 
@@ -450,18 +491,34 @@ def screen_extraction():
             with st.chat_message("assistant"):
                 with st.spinner("Analyzing public dataset..."):
                     result = pipeline.run(user_msg)
-                    ans = result.get("final_answer", "")
-                    st.write(ans)
                     
-                    # Save answer to app_state
-                    st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
-                    
-                    if result.get("proof_ids"):
-                        # Save evidence to app_state
-                        st.session_state.app_state["evidence_locker"].append({
-                            "query": user_msg, "answer": ans, "ids": result["proof_ids"]
-                        })
-                        st.toast("Evidence saved to locker")
+                    # --- ERROR HANDLING FIX START ---
+                    if result.get("status") == "ERROR":
+                        err_msg = result.get("error", "Unknown Error")
+                        st.error(f"Pipeline Error: {err_msg}")
+                        # Optionally add technical details
+                        with st.expander("Technical Details"):
+                            st.write(result)
+                    else:
+                        # Success Path
+                        ans = result.get("final_answer", "No answer generated.")
+                        st.write(ans)
+                        
+                        # Show Cypher if available (Debugging)
+                        if result.get("cypher_query"):
+                            with st.expander("Generated Cypher"):
+                                st.code(result["cypher_query"], language="cypher")
+
+                        # Save answer to app_state
+                        st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
+                        
+                        if result.get("proof_ids"):
+                            # Save evidence to app_state
+                            st.session_state.app_state["evidence_locker"].append({
+                                "query": user_msg, "answer": ans, "ids": result["proof_ids"]
+                            })
+                            st.toast("Evidence saved to locker")
+                    # --- ERROR HANDLING FIX END ---
 
     # --- TAB 2: RAW CYPHER INPUT (NEW) ---
     with tab_cypher:
@@ -493,6 +550,7 @@ def screen_extraction():
                                 st.warning("Query returned no results.")
                     except Exception as e:
                         st.error(f"Cypher Syntax Error: {e}")
+
 @st.fragment
 def screen_locker():
     st.title("🗄️ Evidence Locker")
