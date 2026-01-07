@@ -426,8 +426,9 @@ def screen_extraction():
     # --- TAB 1: EXISTING AGENT CHAT ---
     with tab_chat:
         # Check Connections
-        driver = get_shared_driver()
-        llm = get_shared_llm()
+        creds = st.session_state.app_state["neo4j_creds"]
+        driver = get_cached_driver(creds["uri"], creds["auth"])
+        llm = get_cached_llm(st.session_state.app_state["mistral_key"])
         
         if not driver or not llm:
             st.warning("System unavailable. Please check secrets.")
@@ -474,7 +475,9 @@ def screen_extraction():
                 st.error("🚨 SECURITY ALERT: destructive commands (DELETE, MERGE, etc.) are not allowed.")
             else:
                 # B. Execution
-                driver = get_shared_driver()
+                creds = st.session_state.app_state["neo4j_creds"]
+                driver = get_cached_driver(creds["uri"], creds["auth"])
+                
                 if driver:
                     try:
                         with driver.session() as session:
