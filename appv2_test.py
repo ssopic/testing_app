@@ -418,48 +418,76 @@ def screen_databook():
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
-    st.title("🔍 Extraction & Search")
-    creds = st.session_state.app_state["neo4j_creds"]
+    st.title("🔍 Extraction & Cypher Sandbox")
     
-    # Initialize Cached Resources
-    driver = get_cached_driver(creds["uri"], creds["auth"])
-    llm = get_cached_llm(st.session_state.app_state["mistral_key"])
+    # 1. Define Tabs
+    tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
     
-    # Init Pipeline with cached resources (Fast!)
-    pipeline = GraphRAGPipeline(driver, llm, st.session_state.app_state["schema_stats"])
-
-    # Chat UI
-    for chat in st.session_state.app_state["chat_history"]:
-        with st.chat_message(chat["role"]): st.write(chat["content"])
-
-    user_msg = st.chat_input("Ask about the graph...")
-    if user_msg:
-        st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
-        with st.chat_message("user"): st.write(user_msg)
+    # --- TAB 1: EXISTING AGENT CHAT ---
+    with tab_chat:
+        # Check Connections
+        driver = get_shared_driver()
+        llm = get_shared_llm()
         
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                result = pipeline.run(user_msg)
-                
-                if result["status"] == "SUCCESS":
+        if not driver or not llm:
+            st.warning("System unavailable. Please check secrets.")
+            return
+            
+        # Pipeline
+        pipeline = GraphRAGPipeline(driver, llm, st.session_state.schema_stats)
+
+        # Chat UI
+        for chat in st.session_state.chat_history:
+            with st.chat_message(chat["role"]): st.write(chat["content"])
+
+        user_msg = st.chat_input("Ask about the graph...")
+        if user_msg:
+            st.session_state.chat_history.append({"role": "user", "content": user_msg})
+            with st.chat_message("user"): st.write(user_msg)
+            
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing public dataset..."):
+                    result = pipeline.run(user_msg)
                     ans = result.get("final_answer", "")
                     st.write(ans)
-                    if result.get("cypher_query"):
-                        with st.expander("View Cypher"): st.code(result["cypher_query"], language="cypher")
-                    
-                    st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
+                    st.session_state.chat_history.append({"role": "assistant", "content": ans})
                     
                     if result.get("proof_ids"):
-                        # Extract Document IDs for Locker
-                        # Assuming logic: extract "doc_id" or "source_pks" from results
-                        # We use the internal utility pipeline._extract_proof_ids but accessed via results if exposed
-                        p_ids = result["proof_ids"]
-                        st.session_state.app_state["evidence_locker"].append({
-                            "query": user_msg, "answer": ans, "ids": p_ids, "cypher": result.get("cypher_query")
+                        st.session_state.evidence_locker.append({
+                            "query": user_msg, "answer": ans, "ids": result["proof_ids"]
                         })
-                        st.toast(f"Saved {len(p_ids)} evidence items!")
-                else:
-                    st.error(f"Error: {result.get('error')}")
+                        st.toast("Evidence saved to locker")
+
+    # --- TAB 2: RAW CYPHER INPUT (NEW) ---
+    with tab_cypher:
+        st.markdown("### Safe Cypher Execution")
+        st.caption("Read-Only mode active. Modifications (CREATE, SET, DELETE) are blocked.")
+        
+        # Default query to help the user start
+        cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n LIMIT 5")
+        
+        if st.button("Run Query"):
+            # A. Security Check
+            # Ensure SAFETY_REGEX is defined at the top of your file:
+            # SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
+            if SAFETY_REGEX.search(cypher_input):
+                st.error("🚨 SECURITY ALERT: destructive commands (DELETE, MERGE, etc.) are not allowed.")
+            else:
+                # B. Execution
+                driver = get_shared_driver()
+                if driver:
+                    try:
+                        with driver.session() as session:
+                            res = session.run(cypher_input)
+                            data = [r.data() for r in res]
+                            
+                            if data:
+                                st.dataframe(pd.DataFrame(data), use_container_width=True)
+                                st.success(f"Returned {len(data)} records.")
+                            else:
+                                st.warning("Query returned no results.")
+                    except Exception as e:
+                        st.error(f"Cypher Syntax Error: {e}")
 
 # FRAGMENT: Locker interaction updates independently
 @st.fragment
