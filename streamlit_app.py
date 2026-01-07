@@ -425,7 +425,7 @@ def screen_extraction():
     
     # --- TAB 1: EXISTING AGENT CHAT ---
     with tab_chat:
-        # Check Connections
+        # Check Connections using credentials from app_state
         creds = st.session_state.app_state["neo4j_creds"]
         driver = get_cached_driver(creds["uri"], creds["auth"])
         llm = get_cached_llm(st.session_state.app_state["mistral_key"])
@@ -434,17 +434,17 @@ def screen_extraction():
             st.warning("System unavailable. Please check secrets.")
             return
             
-        # Pipeline
-        # FIX: Access schema_stats from app_state
+        # Pipeline: Pass schema_stats from app_state
         pipeline = GraphRAGPipeline(driver, llm, st.session_state.app_state["schema_stats"])
 
-        # Chat UI
-        for chat in st.session_state.chat_history:
+        # Chat UI: Iterate over chat_history in app_state
+        for chat in st.session_state.app_state["chat_history"]:
             with st.chat_message(chat["role"]): st.write(chat["content"])
 
         user_msg = st.chat_input("Ask about the graph...")
         if user_msg:
-            st.session_state.chat_history.append({"role": "user", "content": user_msg})
+            # Update app_state chat history
+            st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
             with st.chat_message("user"): st.write(user_msg)
             
             with st.chat_message("assistant"):
@@ -452,10 +452,13 @@ def screen_extraction():
                     result = pipeline.run(user_msg)
                     ans = result.get("final_answer", "")
                     st.write(ans)
-                    st.session_state.chat_history.append({"role": "assistant", "content": ans})
+                    
+                    # Save answer to app_state
+                    st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
                     
                     if result.get("proof_ids"):
-                        st.session_state.evidence_locker.append({
+                        # Save evidence to app_state
+                        st.session_state.app_state["evidence_locker"].append({
                             "query": user_msg, "answer": ans, "ids": result["proof_ids"]
                         })
                         st.toast("Evidence saved to locker")
@@ -490,7 +493,6 @@ def screen_extraction():
                                 st.warning("Query returned no results.")
                     except Exception as e:
                         st.error(f"Cypher Syntax Error: {e}")
-# FRAGMENT: Locker interaction updates independently
 @st.fragment
 def screen_locker():
     st.title("🗄️ Evidence Locker")
