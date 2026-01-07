@@ -304,10 +304,22 @@ class GraphRAGPipeline:
                     with self.driver.session() as session:
                         res_obj = session.run(raw_cypher)
                         records = [r.data() for r in res_obj]
+                        
                         # Capture notifications/warnings if available
                         summary = res_obj.consume()
                         if summary.notifications:
-                             attempt_log["warnings"] = [{"code": n.code, "message": n.description} for n in summary.notifications]
+                             # FIX: Robust warning handling (Dict vs Object)
+                             warnings = []
+                             for n in summary.notifications:
+                                 # Handle Neo4j driver returning dicts instead of objects
+                                 if isinstance(n, dict):
+                                     code = n.get("code", "UNKNOWN")
+                                     msg = n.get("description", "No description")
+                                 else:
+                                     code = getattr(n, "code", "UNKNOWN")
+                                     msg = getattr(n, "description", "No description")
+                                 warnings.append({"code": code, "message": msg})
+                             attempt_log["warnings"] = warnings
                         
                         results = records
                         attempt_log["status"] = "SUCCESS"
