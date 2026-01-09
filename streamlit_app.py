@@ -111,7 +111,6 @@ SYSTEM_PROMPTS = {
         "You are a Cypher query planning expert. Analyze the user's natural language query. "
         "Determine if this is a simple lookup or a 'MultiHop' query.\n"
         "RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list.\n"
-        "VERB FILTERS: If the user specifically asks for exact phrases, extract those exact strings into 'filter_on_verbs'."
     ),
     "Schema Selector": (
         "You are a Schema Context manager. Select ONLY the Node Labels and Relationship Types relevant to the blueprint.\n"
