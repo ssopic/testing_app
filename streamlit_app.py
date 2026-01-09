@@ -605,7 +605,7 @@ def screen_analysis():
         with st.expander("Raw Content"):
             st.text_area("Context", context, height=200)
             
-        q = st.text_input("Ask about this evidence:")
+        q = st.chat_input("Ask about this evidence:")
         if q:
             llm = get_cached_llm(st.session_state.app_state["mistral_key"])
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
