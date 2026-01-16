@@ -127,16 +127,28 @@ SYSTEM_PROMPTS = {
         "2. EXACT RETURN: Once you identify the match, return the string EXACTLY as it appears in FULL_SCHEMA.\n"
         "3. PROPERTY AWARENESS: Pass the valid property lists. This prevents the generator from inventing properties like '.type' or '.status' if they don't exist."
     ),
+    # The grounding Agent has been modified to never use ANY other labels and properties other than for the persons name.  
     "Grounding Agent": (
         "You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.\n"
         "CHAIN OF THOUGHT (Required):\n"
         "1. Analyze Entities: Is 'Island' a Person or a Location? Check the Schema labels.\n"
-        "2. Check Properties: Does the `PERSON` label have a 'type' property? If no, do not use `n.type`.\n"
-        "3. Define Path: If the destination is a Location, ensure the path includes a node with that Label (e.g., `(p)-[:MOVED]->(l:LOCATION)`).\n\n"
+        "2. If you are sure the Node is a Person feel free to use the .name property. If it is any other label, leave the details empty.\n"
+        "3. Define Path: If the destination is a Location, ensure the right relationship type is being used (e.g., `(p)-[:MOVED]->(l:)`).\n\n"
         "TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.\n"
         "MULTI-HOP: The 'proposed_relationships' list (e.g., ['paid', 'visited']) must be mapped to the valid schema types provided in the SCHEMA list.\n"
-        "PROVENANCE: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks, r.doc_id)` to handle both fields.\n"
+        "PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results. .\n"
+        "PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'document'.\n"
+        
         "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
+
+# Old variant saved for a version when the nodes are properly cleaned       
+#        "1. Analyze Entities: Is 'Island' a Person or a Location? Check the Schema labels.\n"
+#        "2. Check Properties: Does the `PERSON` label have a 'type' property? If no, do not use `n.type`.\n"
+#        "3. Define Path: If the destination is a Location, ensure the path includes a node with that Label (e.g., `(p)-[:MOVED]->(l:LOCATION)`).\n\n"
+#        "TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.\n"
+#        "MULTI-HOP: The 'proposed_relationships' list (e.g., ['paid', 'visited']) must be mapped to the valid schema types provided in the SCHEMA list.\n"
+#        "PROVENANCE: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks, r.doc_id)` to handle both fields.\n"
+#        "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
     ),
     "Cypher Generator": (
         "You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query. "
@@ -145,6 +157,7 @@ SYSTEM_PROMPTS = {
         "   Example 2 steps: (a:Label1)-[r1:REL_TYPE_1]->(b)-[r2:REL_TYPE_2]->(c:Label2).\n"
         "   CRITICAL: Do NOT create self-loops like `(b)--(b)`. Ensure the path is continuous: `(a)-[r1]->(b)-[r2]->(c)`.\n"
         "2. PROPERTIES: Only use properties explicitly listed in the Schema. Do NOT invent properties like `.type`, `.category`, etc.\n"
+        "   **CRITICAL EXCEPTION**: For (n:Person), ONLY use `n.name`. NEVER use `n.id` or `n.entity_id`.\n"
         "3. FUZZY MATCHING: For names/strings, prefer `toLower(n.name) CONTAINS 'island'` over strict equality `=` to handle messy data.\n"
         "4. VERB FILTERS: If 'filter_on_verbs' is provided, add a WHERE clause to check `raw_verbs` on the relationships.\n"
         "   Example: `WHERE ANY(v IN r1.raw_verbs WHERE v CONTAINS 'stocks of')`.\n"
