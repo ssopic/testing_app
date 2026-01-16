@@ -174,7 +174,7 @@ SYSTEM_PROMPTS = {
         "Provide a `fixed_cypher` string with the correction."
     ),
     "Synthesizer": (
-        "You are a conversational AI. Synthesize a concise answer based on the provided DB preview. "
+        "You are a conversational AI. Explain the cypher query, explaining it compared to the users question. Synthesize a concise answer based on the provided DB preview but make sure to mention that this is a wide search and furhter questions can be asked at the analysis section. "
         "If the result is empty, state clearly that no information was found."
     )
 }
