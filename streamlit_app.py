@@ -158,7 +158,7 @@ SYSTEM_PROMPTS = {
         "   CRITICAL 2: All labels are CAPITALIZED.\n"
         "2. PROPERTIES: Only use properties explicitly listed in the Schema. Do NOT invent properties like `.type`, `.category`, etc.\n"
         "   **CRITICAL EXCEPTION**: For (n:Person), ONLY use `n.name`. NEVER use `n.id` or `n.entity_id`.\n"
-        "3. FUZZY MATCHING: For names/strings, prefer `toLower(n.name) CONTAINS 'island'` over strict equality `=` to handle messy data.\n"
+        "3. FUZZY MATCHING: For names/strings, always use `toLower(n.name) CONTAINS 'Johnny'` over strict equality `=` to handle messy data.\n"
         "4. VERB FILTERS: If 'filter_on_verbs' is provided, add a WHERE clause to check `raw_verbs` on the relationships.\n"
         "   Example: `WHERE ANY(v IN r1.raw_verbs WHERE v CONTAINS 'stocks of')`.\n"
         "5. PROVENANCE: Return provenance from the relationship variables using `coalesce(r.source_pks, r.doc_id)`. "
