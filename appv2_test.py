@@ -111,7 +111,6 @@ SYSTEM_PROMPTS = {
         "You are a Cypher query planning expert. Analyze the user's natural language query. "
         "Determine if this is a simple lookup or a 'MultiHop' query.\n"
         "RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list.\n"
-        "VERB FILTERS: If the user specifically asks for exact phrases, extract those exact strings into 'filter_on_verbs'."
     ),
     "Schema Selector": (
         "You are a Schema Context manager. Select ONLY the Node Labels and Relationship Types relevant to the blueprint.\n"
@@ -304,10 +303,22 @@ class GraphRAGPipeline:
                     with self.driver.session() as session:
                         res_obj = session.run(raw_cypher)
                         records = [r.data() for r in res_obj]
+                        
                         # Capture notifications/warnings if available
                         summary = res_obj.consume()
                         if summary.notifications:
-                             attempt_log["warnings"] = [{"code": n.code, "message": n.description} for n in summary.notifications]
+                             # FIX: Robust warning handling (Dict vs Object)
+                             warnings = []
+                             for n in summary.notifications:
+                                 # Handle Neo4j driver returning dicts instead of objects
+                                 if isinstance(n, dict):
+                                     code = n.get("code", "UNKNOWN")
+                                     msg = n.get("description", "No description")
+                                 else:
+                                     code = getattr(n, "code", "UNKNOWN")
+                                     msg = getattr(n, "description", "No description")
+                                 warnings.append({"code": code, "message": msg})
+                             attempt_log["warnings"] = warnings
                         
                         results = records
                         attempt_log["status"] = "SUCCESS"
@@ -386,32 +397,73 @@ def screen_connection():
 @st.fragment
 def screen_databook():
     st.title("📚 The Databook")
+    # FIX: Access schema_stats from app_state
     stats = st.session_state.app_state["schema_stats"]
-    search = st.text_input("Fuzzy Filter Labels")
     
-    col_n, col_r = st.columns(2)
-    with col_n:
+    if stats.get("status") != "SUCCESS":
+        st.error("Failed to load schema.")
+        return
+
+    # Unified Filter for both columns
+    filter_text = st.text_input("Filter Labels & Types", placeholder="e.g. Person")
+
+    col_nodes, col_rels = st.columns(2)
+
+    # --- LEFT COLUMN: NODES (Advanced Features) ---
+    with col_nodes:
         st.subheader("Nodes")
         labels = stats.get("NodeLabels", [])
-        if search: labels = difflib.get_close_matches(search, labels, n=10, cutoff=0.3)
+        if filter_text:
+            labels = [l for l in labels if filter_text.lower() in l.lower()]
         
         for label in labels:
-            with st.expander(f"{label} ({stats['NodeCounts'].get(label, 0)})"):
-                st.write("**Properties:**", stats["NodeProperties"].get(label, []))
-                if st.button(f"Preview {label}", key=f"p_{label}"):
-                    # Use CACHED driver
+            count = stats["NodeCounts"].get(label, 0)
+            with st.expander(f"📦 {label} ({count:,})"):
+                st.caption(f"Properties: {', '.join(stats['NodeProperties'].get(label, [])[:5])}...")
+                
+                # --- ADVANCED SHOWCASING RESTORED ---
+                # 1. Search Bar specific to this node type
+                node_search = st.text_input(f"Search {label}", key=f"s_{label}", placeholder="Value to find...")
+                limit = st.selectbox("Limit", [5, 10, 50], key=f"l_{label}")
+                
+                if st.button(f"Fetch Data", key=f"b_{label}"):
+                    # FIX: Credentials from app_state
                     creds = st.session_state.app_state["neo4j_creds"]
                     driver = get_cached_driver(creds["uri"], creds["auth"])
-                    with driver.session() as s:
-                        st.json([r.data() for r in s.run(f"MATCH (n:`{label}`) RETURN n LIMIT 3")])
+                    
+                    if driver:
+                        with driver.session() as session:
+                            if node_search:
+                                # Advanced Query: Search ANY property for the term
+                                query = f"""
+                                MATCH (n:`{label}`) 
+                                WHERE any(prop in keys(n) WHERE toString(n[prop]) CONTAINS $term)
+                                RETURN n LIMIT toInteger($limit)
+                                """
+                                params = {"term": node_search, "limit": limit}
+                            else:
+                                # Standard Fetch
+                                query = f"MATCH (n:`{label}`) RETURN n LIMIT toInteger($limit)"
+                                params = {"limit": limit}
+                            
+                            results = session.run(query, params)
+                            data = [r["n"] for r in results]
+                            
+                            if data:
+                                # Render as interactive Table
+                                st.dataframe(pd.DataFrame(data), use_container_width=True)
+                            else:
+                                st.info("No results found.")
 
-    with col_r:
+    # --- RIGHT COLUMN: RELATIONSHIPS ---
+    with col_rels:
         st.subheader("Relationships")
         rels = stats.get("RelationshipTypes", [])
-        if search: rels = difflib.get_close_matches(search, rels, n=10, cutoff=0.3)
-        
+        if filter_text:
+            rels = [r for r in rels if filter_text.lower() in r.lower()]
+            
         for rtype in rels:
-            with st.expander(rtype):
+            with st.expander(f"🔗 {rtype}"):
                 st.write("**Verbs:**", stats["RelationshipVerbs"].get(rtype, []))
                 st.write("**Properties:**", stats["RelationshipProperties"].get(rtype, []))
 
@@ -425,38 +477,59 @@ def screen_extraction():
     
     # --- TAB 1: EXISTING AGENT CHAT ---
     with tab_chat:
-        # Check Connections
-        driver = get_shared_driver()
-        llm = get_shared_llm()
+        # Check Connections using credentials from app_state
+        creds = st.session_state.app_state["neo4j_creds"]
+        driver = get_cached_driver(creds["uri"], creds["auth"])
+        llm = get_cached_llm(st.session_state.app_state["mistral_key"])
         
         if not driver or not llm:
             st.warning("System unavailable. Please check secrets.")
             return
             
-        # Pipeline
-        pipeline = GraphRAGPipeline(driver, llm, st.session_state.schema_stats)
+        # Pipeline: Pass schema_stats from app_state
+        pipeline = GraphRAGPipeline(driver, llm, st.session_state.app_state["schema_stats"])
 
-        # Chat UI
-        for chat in st.session_state.chat_history:
+        # Chat UI: Iterate over chat_history in app_state
+        for chat in st.session_state.app_state["chat_history"]:
             with st.chat_message(chat["role"]): st.write(chat["content"])
 
         user_msg = st.chat_input("Ask about the graph...")
         if user_msg:
-            st.session_state.chat_history.append({"role": "user", "content": user_msg})
+            # Update app_state chat history
+            st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
             with st.chat_message("user"): st.write(user_msg)
             
             with st.chat_message("assistant"):
                 with st.spinner("Analyzing public dataset..."):
                     result = pipeline.run(user_msg)
-                    ans = result.get("final_answer", "")
-                    st.write(ans)
-                    st.session_state.chat_history.append({"role": "assistant", "content": ans})
                     
-                    if result.get("proof_ids"):
-                        st.session_state.evidence_locker.append({
-                            "query": user_msg, "answer": ans, "ids": result["proof_ids"]
-                        })
-                        st.toast("Evidence saved to locker")
+                    # --- ERROR HANDLING FIX START ---
+                    if result.get("status") == "ERROR":
+                        err_msg = result.get("error", "Unknown Error")
+                        st.error(f"Pipeline Error: {err_msg}")
+                        # Optionally add technical details
+                        with st.expander("Technical Details"):
+                            st.write(result)
+                    else:
+                        # Success Path
+                        ans = result.get("final_answer", "No answer generated.")
+                        st.write(ans)
+                        
+                        # Show Cypher if available (Debugging)
+                        if result.get("cypher_query"):
+                            with st.expander("Generated Cypher"):
+                                st.code(result["cypher_query"], language="cypher")
+
+                        # Save answer to app_state
+                        st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
+                        
+                        if result.get("proof_ids"):
+                            # Save evidence to app_state
+                            st.session_state.app_state["evidence_locker"].append({
+                                "query": user_msg, "answer": ans, "ids": result["proof_ids"]
+                            })
+                            st.toast("Evidence saved to locker")
+                    # --- ERROR HANDLING FIX END ---
 
     # --- TAB 2: RAW CYPHER INPUT (NEW) ---
     with tab_cypher:
@@ -468,13 +541,13 @@ def screen_extraction():
         
         if st.button("Run Query"):
             # A. Security Check
-            # Ensure SAFETY_REGEX is defined at the top of your file:
-            # SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
             if SAFETY_REGEX.search(cypher_input):
                 st.error("🚨 SECURITY ALERT: destructive commands (DELETE, MERGE, etc.) are not allowed.")
             else:
                 # B. Execution
-                driver = get_shared_driver()
+                creds = st.session_state.app_state["neo4j_creds"]
+                driver = get_cached_driver(creds["uri"], creds["auth"])
+                
                 if driver:
                     try:
                         with driver.session() as session:
@@ -489,7 +562,6 @@ def screen_extraction():
                     except Exception as e:
                         st.error(f"Cypher Syntax Error: {e}")
 
-# FRAGMENT: Locker interaction updates independently
 @st.fragment
 def screen_locker():
     st.title("🗄️ Evidence Locker")
@@ -532,7 +604,7 @@ def screen_analysis():
         with st.expander("Raw Content"):
             st.text_area("Context", context, height=200)
             
-        q = st.text_input("Ask about this evidence:")
+        q = st.chat_input("Ask about this evidence:")
         if q:
             llm = get_cached_llm(st.session_state.app_state["mistral_key"])
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
