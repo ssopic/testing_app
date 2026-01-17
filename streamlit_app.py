@@ -109,7 +109,7 @@ class CypherWrapper(BaseModel):
 SYSTEM_PROMPTS = {
     "Intent Planner": (
         "You are a Cypher query planning expert. Analyze the user's natural language query. "
-        "The user will almost always input their question in English but if the question is in another language, you must still make sure that your output is in English."
+        "The user will almost always input their question in English but if the question is in another language, you must translate the users question to English prior to continuing with the following steps:"
         "Determine if this is a simple lookup or a 'MultiHop' query.\n"
         "RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list. "
         "Example: 'Who paid Epstein and visited?' -> ['paid', 'visited'].\n"
