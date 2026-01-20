@@ -811,27 +811,30 @@ def screen_locker():
     st.title("🗄️ Evidence Locker")
     locker = st.session_state.app_state["evidence_locker"]
     
+    # 1. Handle Empty Locker
     if not locker:
         st.info("Locker is empty.")
         return
 
-        current_selection = set()
+    # 2. Initialize Selection Set (Must be before loop)
+    current_selection = set()
 
+    # 3. Render Checkboxes & Rebuild Selection
     for i, entry in enumerate(locker):
         with st.container(border=True):
             c1, c2 = st.columns([0.1, 0.9])
             with c1:
-                # Use a unique key for every checkbox to avoid state conflict in fragment
+                # Use a unique key for every checkbox to avoid state conflict
                 is_sel = st.checkbox("Select", key=f"sel_{i}")
                 if is_sel: 
-                    # Add IDs to the local set if checked
+                    # If checked, add these IDs to our temporary set
                     for pid in entry["ids"]: 
                         current_selection.add(str(pid))
             with c2:
                 st.write(f"**Query:** {entry['query']}")
                 st.caption(f"Found IDs: {', '.join(entry['ids'])}")
 
-    # Update global state with the clean, synchronized selection
+    # 4. Commit to Global State (Overwrites previous state)
     st.session_state.app_state["selected_ids"] = current_selection
 
 @st.fragment
