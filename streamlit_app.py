@@ -524,18 +524,24 @@ def fetch_schema_statistics(uri: str, auth: tuple) -> Dict[str, Any]:
         if driver: driver.close()
     return stats
 
-def extract_provenance_from_result(result: Dict) -> List[str]:
-    """Scans JSON recursively for any keys containing 'provenance'."""
+def extract_provenance_from_result(result: Union[Dict, List]) -> List[str]:
+    """Scans JSON recursively for keys indicating ID storage (provenance, pks, doc_id)."""
     ids = []
+    # Broader set of keywords to catch un-aliased returns like 'r.source_pks'
+    target_keys = ["provenance", "source_pks", "doc_id", "id_list", "pk"]
+    
     def recurse(data):
         if isinstance(data, dict):
             for k, v in data.items():
-                if "provenance" in k.lower():
+                # Check if ANY target key matches the result key (case-insensitive)
+                if any(t in k.lower() for t in target_keys):
                     if isinstance(v, list): ids.extend([str(i) for i in v])
                     else: ids.append(str(v))
-                else: recurse(v)
+                else: 
+                    recurse(v)
         elif isinstance(data, list):
             for item in data: recurse(item)
+            
     recurse(result)
     return list(set(ids))
 
@@ -719,7 +725,7 @@ def screen_extraction():
     # 1. Define Tabs
     tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
     
-    # --- TAB 1: EXISTING AGENT CHAT ---
+    # --- TAB 1: EXISTING AGENT CHAT (Preserved) ---
     with tab_chat:
         # Check Connections using credentials from app_state
         creds = st.session_state.app_state["neo4j_creds"]
@@ -747,48 +753,44 @@ def screen_extraction():
                 with st.spinner("Analyzing public dataset..."):
                     result = pipeline.run(user_msg)
                     
-                    # --- ERROR HANDLING FIX START ---
                     if result.get("status") == "ERROR":
                         err_msg = result.get("error", "Unknown Error")
                         st.error(f"Pipeline Error: {err_msg}")
-                        # Optionally add technical details
                         with st.expander("Technical Details"):
                             st.write(result)
                     else:
-                        # Success Path
                         ans = result.get("final_answer", "No answer generated.")
                         st.write(ans)
                         
-                        # Show Cypher if available (Debugging)
                         if result.get("cypher_query"):
                             with st.expander("Generated Cypher"):
                                 st.code(result["cypher_query"], language="cypher")
 
-                        # Save answer to app_state
                         st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
                         
                         if result.get("proof_ids"):
-                            # Save evidence to app_state
                             st.session_state.app_state["evidence_locker"].append({
                                 "query": user_msg, "answer": ans, "ids": result["proof_ids"]
                             })
                             st.toast("Evidence saved to locker")
-                    # --- ERROR HANDLING FIX END ---
 
-    # --- TAB 2: RAW CYPHER INPUT (NEW) ---
+    # --- TAB 2: RAW CYPHER INPUT (Updated with Save Logic) ---
     with tab_cypher:
         st.markdown("### Safe Cypher Execution")
         st.caption("Read-Only mode active. Modifications (CREATE, SET, DELETE) are blocked.")
         
-        # Default query to help the user start
+        # State container for manual query results
+        if "manual_results" not in st.session_state:
+            st.session_state.manual_results = None
+        if "manual_query_text" not in st.session_state:
+            st.session_state.manual_query_text = ""
+
         cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n LIMIT 5")
         
         if st.button("Run Query"):
-            # A. Security Check
             if SAFETY_REGEX.search(cypher_input):
-                st.error("🚨 SECURITY ALERT: destructive commands (DELETE, MERGE, etc.) are not allowed.")
+                st.error("🚨 SECURITY ALERT: destructive commands are not allowed.")
             else:
-                # B. Execution
                 creds = st.session_state.app_state["neo4j_creds"]
                 driver = get_cached_driver(creds["uri"], creds["auth"])
                 
@@ -798,13 +800,36 @@ def screen_extraction():
                             res = session.run(cypher_input)
                             data = [r.data() for r in res]
                             
-                            if data:
-                                st.dataframe(pd.DataFrame(data), use_container_width=True)
-                                st.success(f"Returned {len(data)} records.")
-                            else:
+                            # Save to temporary state for the 'Save' button to access
+                            st.session_state.manual_results = data
+                            st.session_state.manual_query_text = cypher_input
+                            
+                            if not data:
                                 st.warning("Query returned no results.")
                     except Exception as e:
                         st.error(f"Cypher Syntax Error: {e}")
+
+        # Display Results & Save Button (Persistent across reruns in fragment)
+        if st.session_state.manual_results:
+            st.divider()
+            st.subheader("Results")
+            st.dataframe(pd.DataFrame(st.session_state.manual_results), use_container_width=True)
+            
+            # Helper to count IDs found
+            found_ids = extract_provenance_from_result(st.session_state.manual_results)
+            st.caption(f"Found {len(found_ids)} potential document IDs.")
+            
+            if st.button("💾 Add Results to Locker"):
+                if found_ids:
+                    payload = {
+                        "query": f"Manual Cypher: {st.session_state.manual_query_text[:30]}...",
+                        "answer": "Manually executed Cypher query results.",
+                        "ids": found_ids
+                    }
+                    st.session_state.app_state["evidence_locker"].append(payload)
+                    st.toast(f"Saved {len(found_ids)} IDs to Locker!")
+                else:
+                    st.warning("No IDs (provenance/source_pks) found in these results to save.")
 
 @st.fragment
 def screen_locker():
