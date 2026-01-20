@@ -811,30 +811,39 @@ def screen_locker():
     st.title("🗄️ Evidence Locker")
     locker = st.session_state.app_state["evidence_locker"]
     
-    # 1. Handle Empty Locker
     if not locker:
         st.info("Locker is empty.")
         return
 
-    # 2. Initialize Selection Set (Must be before loop)
+    # 1. Initialize local selection set
     current_selection = set()
+    
+    # 2. Retrieve previously selected IDs to restore checkbox state
+    global_selected = st.session_state.app_state.get("selected_ids", set())
 
-    # 3. Render Checkboxes & Rebuild Selection
     for i, entry in enumerate(locker):
         with st.container(border=True):
             c1, c2 = st.columns([0.1, 0.9])
             with c1:
-                # Use a unique key for every checkbox to avoid state conflict
-                is_sel = st.checkbox("Select", key=f"sel_{i}")
+                # 3. Logic: If the entry's IDs are already in the global set, check the box.
+                # We convert entry IDs to a set of strings to compare.
+                entry_ids_str = {str(pid) for pid in entry["ids"]}
+                
+                # Check if this batch is already selected (subset of global selection)
+                is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
+                # 4. Render Checkbox with `value=` set to restored state
+                is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
+                
                 if is_sel: 
-                    # If checked, add these IDs to our temporary set
+                    # If checked (either by user or restored state), add to current set
                     for pid in entry["ids"]: 
                         current_selection.add(str(pid))
             with c2:
                 st.write(f"**Query:** {entry['query']}")
                 st.caption(f"Found IDs: {', '.join(entry['ids'])}")
 
-    # 4. Commit to Global State (Overwrites previous state)
+    # 5. Commit to Global State
     st.session_state.app_state["selected_ids"] = current_selection
 
 @st.fragment
