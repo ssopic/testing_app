@@ -13,6 +13,279 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, Field, ValidationError
 
+# ---Visualization and url parsing ---
+import plotly.express as px
+import urllib.parse
+
+
+
+# ==========================================
+### NEW DATABOOK ###
+# ==========================================
+# 1. FALLBACK DB FUNCTIONS
+# ==========================================
+
+def get_db_driver():
+    """Retrieves the cached driver from the main app state."""
+    if "app_state" in st.session_state and "neo4j_creds" in st.session_state.app_state:
+        creds = st.session_state.app_state["neo4j_creds"]
+        uri = creds.get("uri")
+        auth = creds.get("auth")
+        if uri and auth:
+            # We assume the main app has already validated this driver
+            # Ideally, we reuse the exact object, but creating a lightweight driver here is safe
+            # if we trust the credentials.
+            return GraphDatabase.driver(uri, auth=auth)
+    return None
+
+def fetch_inventory_from_db():
+    """Fallback: Generates the inventory dict by querying the live DB."""
+    inventory = {"Object": {}, "Verb": {}, "Lexical": {}}
+    driver = get_db_driver()
+    
+    if not driver:
+        return {}
+        
+    try:
+        with driver.session() as session:
+            # Get all labels
+            labels_result = session.run("CALL db.labels()")
+            labels = [r[0] for r in labels_result]
+            
+            # For each label, get a sample of names
+            # LIMIT 50 to prevent exploding the UI
+            for label in labels:
+                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name LIMIT 50"
+                names = [r["name"] for r in session.run(q)]
+                if names:
+                    inventory["Object"][label] = sorted(names)
+    except Exception as e:
+        st.warning(f"DB Fallback failed: {e}")
+    finally:
+        driver.close()
+        
+    return inventory
+
+def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.DataFrame:
+    """
+    Fallback: Generates the DataFrame by running a live Cypher query.
+    Mimics the structure: [edge, node, node_name, id_list, count]
+    """
+    driver = get_db_driver()
+    if not driver:
+        return pd.DataFrame()
+
+    # Cypher query to aggregate neighbors
+    # We collect IDs to populate the 'id_list' expected by the UI
+    # We assume 'source_pks' or 'doc_id' exists, otherwise we use internal ID
+    query = f"""
+    MATCH (n:`{label}`)-[r]->(m)
+    WHERE n.name = $name
+    RETURN 
+        type(r) as edge, 
+        labels(m)[0] as node, 
+        coalesce(m.name, 'Unknown') as node_name, 
+        count(r) as count,
+        collect(coalesce(r.source_pks, r.doc_id, toString(id(r)))) as id_list
+    LIMIT 1000
+    """
+    
+    try:
+        with driver.session() as session:
+            result = session.run(query, name=name)
+            data = [r.data() for r in result]
+            return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"Live Query failed: {e}")
+        return pd.DataFrame()
+    finally:
+        driver.close()
+
+# ==========================================
+# 2. HYBRID FETCHERS (GITHUB -> DB)
+# ==========================================
+
+@st.cache_data(ttl=3600)
+def fetch_inventory() -> dict:
+    """
+    Hybrid Fetcher:
+    1. Try GitHub (Fast, Static)
+    2. Fallback to DB (Slower, Fresh)
+    """
+    # 1. Try GitHub
+    url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/inventory.json"
+    try:
+        response = pd.read_json(url)
+        return response.to_dict()
+    except Exception:
+        # 2. Fallback to DB
+        # We do NOT log a warning here to avoid scaring the user; it's a valid fallback.
+        return fetch_inventory_from_db()
+
+@st.cache_data(ttl=3600)
+def fetch_sunburst_data(selector_type: str, label: str, name: str) -> pd.DataFrame:
+    """
+    Hybrid Fetcher:
+    1. Try GitHub JSON
+    2. Fallback to Live Cypher
+    """
+    base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
+    
+    prefix_map = {"Object": "node", "Verb": "relationship", "Lexical": "lexical"}
+    file_prefix = prefix_map.get(selector_type, "node")
+    
+    safe_label = label.lower().strip()
+    safe_name = urllib.parse.quote(name.strip()) 
+    
+    filename = f"{file_prefix}_{safe_label}_{safe_name}.json"
+    full_url = f"{base_url}{filename}"
+    
+    try:
+        df = pd.read_json(full_url)
+        if df.empty: raise ValueError("Empty JSON")
+        return df
+    except Exception:
+        # Fallback to DB
+        return fetch_sunburst_from_db(selector_type, label, name)
+
+# ==========================================
+# 3. FRAGMENT: WORKSPACE
+# ==========================================
+
+@st.fragment
+def render_explorer_workspace(selector_type, selected_label, selected_name):
+    c_mid, c_right = st.columns([2, 1])
+    
+    with c_mid:
+        if not selected_name:
+            st.info("👈 Select an entity from the left to explore.")
+            return
+
+        st.subheader(f"{selected_name}")
+        
+        # Fetch Data (Hybrid)
+        df = fetch_sunburst_data(selector_type, selected_label, selected_name)
+
+        if df.empty:
+            st.warning(f"No data found for {selected_name} (checked GitHub & DB).")
+            return
+
+        # Check source (Implicitly via checking session state or just rendering)
+        # We don't explicitly show "Source: DB" vs "Source: GitHub" to keep UI clean,
+        # but the speed difference will be noticeable.
+
+        fig = px.sunburst(
+            df, 
+            path=['edge', 'node', 'node_name'], 
+            values='count',
+            color='edge',
+            hover_data=['id_list']
+        )
+        fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c_right:
+        st.subheader("Extraction")
+        st.caption("Select data to add to Evidence Locker")
+
+        all_ids = []
+        if 'id_list' in df.columns:
+            for ids in df['id_list']:
+                if isinstance(ids, list):
+                    all_ids.extend(ids)
+                else:
+                    all_ids.append(ids)
+        
+        unique_ids = list(set(all_ids))
+        
+        st.metric("Documents Found", len(unique_ids))
+        with st.expander("Preview ID List", expanded=False):
+            st.write(unique_ids)
+
+        if st.button("Add to Locker", type="primary", use_container_width=True):
+            if not unique_ids:
+                st.error("No documents to add.")
+            else:
+                payload = {
+                    "query": f"Manual Explorer: {selected_label} -> {selected_name}",
+                    "answer": f"Visual discovery via {selector_type} found {len(unique_ids)} related documents.",
+                    "ids": [str(uid) for uid in unique_ids]
+                }
+                
+                if "evidence_locker" not in st.session_state.app_state:
+                    st.session_state.app_state["evidence_locker"] = []
+                    
+                st.session_state.app_state["evidence_locker"].append(payload)
+                st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
+                
+        current_count = len(st.session_state.app_state.get("evidence_locker", []))
+        st.caption(f"Total items in Locker: {current_count}")
+
+# ==========================================
+# 4. MAIN SCREEN CONTROLLER
+# ==========================================
+
+def screen_databook():
+    st.title("🧭 The Databook Explorer")
+    
+    # Hybrid Fetch
+    inventory = fetch_inventory()
+    
+    if not inventory:
+        st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
+    
+    c_left, c_workspace = st.columns([1, 3])
+
+    with c_left:
+        with st.container(border=True):
+            st.subheader("Selector")
+            
+            selector_type = st.radio(
+                "Analysis Mode", 
+                ["Object", "Verb", "Lexical"], 
+                captions=["Node-Centric", "Relationship-Centric", "Text-Mentions"],
+                horizontal=True
+            )
+            st.divider()
+            
+            selected_label = None
+            selected_name = None
+
+            available_data = inventory.get(selector_type, {})
+            
+            if not available_data:
+                st.caption(f"No inventory for {selector_type}.")
+                # If falling back to DB, 'Object' might be populated but 'Verb' empty.
+            else:
+                if isinstance(available_data, dict):
+                    labels = sorted(list(available_data.keys()))
+                    for label in labels:
+                        with st.expander(f"{label}"):
+                            names = available_data[label]
+                            names = sorted(names) if isinstance(names, list) else []
+                            
+                            if names:
+                                selection = st.radio(
+                                    "Select Entity:", 
+                                    names, 
+                                    key=f"sel_{selector_type}_{label}", 
+                                    index=None
+                                )
+                                if selection:
+                                    selected_label = label
+                                    selected_name = selection
+                            else:
+                                st.caption("No names listed.")
+                else:
+                    st.error("Invalid inventory format.")
+
+    with c_workspace:
+        render_explorer_workspace(selector_type, selected_label, selected_name)
+
+# ==========================================
+# 0. NON UPDATED PARTS
+# ==========================================
+
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
 
@@ -128,7 +401,6 @@ SYSTEM_PROMPTS = {
         "2. EXACT RETURN: Once you identify the match, return the string EXACTLY as it appears in FULL_SCHEMA.\n"
         "3. PROPERTY AWARENESS: Pass the valid property lists. This prevents the generator from inventing properties like '.type' or '.status' if they don't exist."
     ),
-    # The grounding Agent has been modified to never use ANY other labels and properties other than for the persons name.  
     "Grounding Agent": (
         "You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.\n"
         "CHAIN OF THOUGHT (Required):\n"
@@ -140,15 +412,6 @@ SYSTEM_PROMPTS = {
         "PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results. .\n"
         "PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'document'.\n"        
         "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
-
-# Old variant saved for a version when the nodes are properly cleaned       
-#        "1. Analyze Entities: Is 'Island' a Person or a Location? Check the Schema labels.\n"
-#        "2. Check Properties: Does the `PERSON` label have a 'type' property? If no, do not use `n.type`.\n"
-#        "3. Define Path: If the destination is a Location, ensure the path includes a node with that Label (e.g., `(p)-[:MOVED]->(l:LOCATION)`).\n\n"
-#        "TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.\n"
-#        "MULTI-HOP: The 'proposed_relationships' list (e.g., ['paid', 'visited']) must be mapped to the valid schema types provided in the SCHEMA list.\n"
-#        "PROVENANCE: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks, r.doc_id)` to handle both fields.\n"
-#        "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
     ),
     "Cypher Generator": (
         "You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query. "
@@ -430,80 +693,6 @@ def screen_connection():
                     st.rerun()
                 else: st.error(stats.get("error"))
 
-# FRAGMENT: Updates only this section when clicking preview
-@st.fragment
-def screen_databook():
-    st.title("📚 The Databook")
-    # FIX: Access schema_stats from app_state
-    stats = st.session_state.app_state["schema_stats"]
-    
-    if stats.get("status") != "SUCCESS":
-        st.error("Failed to load schema.")
-        return
-
-    # Unified Filter for both columns
-    filter_text = st.text_input("Filter Labels & Types", placeholder="e.g. Person")
-
-    col_nodes, col_rels = st.columns(2)
-
-    # --- LEFT COLUMN: NODES (Advanced Features) ---
-    with col_nodes:
-        st.subheader("Nodes")
-        labels = stats.get("NodeLabels", [])
-        if filter_text:
-            labels = [l for l in labels if filter_text.lower() in l.lower()]
-        
-        for label in labels:
-            count = stats["NodeCounts"].get(label, 0)
-            with st.expander(f"📦 {label} ({count:,})"):
-                st.caption(f"Properties: {', '.join(stats['NodeProperties'].get(label, [])[:5])}...")
-                
-                # --- ADVANCED SHOWCASING RESTORED ---
-                # 1. Search Bar specific to this node type
-                node_search = st.text_input(f"Search {label}", key=f"s_{label}", placeholder="Value to find...")
-                limit = st.selectbox("Limit", [5, 10, 50], key=f"l_{label}")
-                
-                if st.button(f"Fetch Data", key=f"b_{label}"):
-                    # FIX: Credentials from app_state
-                    creds = st.session_state.app_state["neo4j_creds"]
-                    driver = get_cached_driver(creds["uri"], creds["auth"])
-                    
-                    if driver:
-                        with driver.session() as session:
-                            if node_search:
-                                # Advanced Query: Search ANY property for the term
-                                query = f"""
-                                MATCH (n:`{label}`) 
-                                WHERE any(prop in keys(n) WHERE toString(n[prop]) CONTAINS $term)
-                                RETURN n LIMIT toInteger($limit)
-                                """
-                                params = {"term": node_search, "limit": limit}
-                            else:
-                                # Standard Fetch
-                                query = f"MATCH (n:`{label}`) RETURN n LIMIT toInteger($limit)"
-                                params = {"limit": limit}
-                            
-                            results = session.run(query, params)
-                            data = [r["n"] for r in results]
-                            
-                            if data:
-                                # Render as interactive Table
-                                st.dataframe(pd.DataFrame(data), use_container_width=True)
-                            else:
-                                st.info("No results found.")
-
-    # --- RIGHT COLUMN: RELATIONSHIPS ---
-    with col_rels:
-        st.subheader("Relationships")
-        rels = stats.get("RelationshipTypes", [])
-        if filter_text:
-            rels = [r for r in rels if filter_text.lower() in r.lower()]
-            
-        for rtype in rels:
-            with st.expander(f"🔗 {rtype}"):
-                st.write("**Verbs:**", stats["RelationshipVerbs"].get(rtype, []))
-                st.write("**Properties:**", stats["RelationshipProperties"].get(rtype, []))
-
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
@@ -653,7 +842,14 @@ if not st.session_state.app_state["connected"]:
     screen_connection()
 else:
     nav = st.sidebar.radio("Navigation", ["Databook", "Search", "Locker", "Analysis"])
-    if nav == "Databook": screen_databook()
+    
+    # UPDATED NAVIGATION: Use the imported explorer component
+    if nav == "Databook": 
+        if 'databook_explorer' in globals():
+            databook_explorer.screen_databook()
+        else:
+            st.error("Databook module not loaded.")
+            
     elif nav == "Search": screen_extraction()
     elif nav == "Locker": screen_locker()
     elif nav == "Analysis": screen_analysis()
@@ -662,3 +858,4 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.app_state["connected"] = False
         st.rerun()
+
