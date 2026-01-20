@@ -338,7 +338,8 @@ def load_github_data():
     url = "https://raw.githubusercontent.com/ssopic/some_data/main/sum_data.csv"
     try:
         df = pd.read_csv(url)
-        df['PK'] = df['PK'].astype(str)
+        # Robust cleaning: convert to string, remove potential '.0' from floats, and strip whitespace
+        df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         return df
     except Exception as e:
         return pd.DataFrame(columns=['PK', 'details'])
