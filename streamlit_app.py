@@ -87,7 +87,6 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
         coalesce(m.name, 'Unknown') as node_name, 
         count(r) as count,
         collect(coalesce(r.source_pks, r.doc_id, toString(id(r)))) as id_list
-    LIMIT 1000
     """
     
     try:
