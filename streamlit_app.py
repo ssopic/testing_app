@@ -844,10 +844,7 @@ else:
     
     # UPDATED NAVIGATION: Use the imported explorer component
     if nav == "Databook": 
-        if 'databook_explorer' in globals():
-            databook_explorer.screen_databook()
-        else:
-            st.error("Databook module not loaded.")
+        screen_databook()
             
     elif nav == "Search": screen_extraction()
     elif nav == "Locker": screen_locker()
