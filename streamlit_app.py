@@ -48,17 +48,32 @@ def fetch_inventory_from_db():
         
     try:
         with driver.session() as session:
-            # Get all labels
+            # 1. POPULATE OBJECTS (Nodes)
             labels_result = session.run("CALL db.labels()")
             labels = [r[0] for r in labels_result]
             
-            # For each label, get a sample of names
-            # LIMIT 50 to prevent exploding the UI
             for label in labels:
                 q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name LIMIT 50"
                 names = [r["name"] for r in session.run(q)]
                 if names:
                     inventory["Object"][label] = sorted(names)
+
+            # 2. POPULATE VERBS (Relationships)
+            # We list the Relationship Types as the "Labels"
+            rels_result = session.run("CALL db.relationshipTypes()")
+            rels = [r[0] for r in rels_result]
+            
+            for r_type in rels:
+                # For relationships, we might not have a "name", so we leave the list empty 
+                # or we could fetch distinct properties if your schema supports it.
+                # This ensures the 'Verb' menu at least shows the types.
+                inventory["Verb"][r_type] = [] 
+
+            # 3. POPULATE LEXICAL
+            # Assuming 'MENTIONED_IN' or similar for lexical graph
+            # We can just initialize it or check if specific nodes exist
+            inventory["Lexical"]["Document"] = []
+
     except Exception as e:
         st.warning(f"DB Fallback failed: {e}")
     finally:
@@ -118,7 +133,6 @@ def fetch_inventory() -> dict:
         return response.to_dict()
     except Exception:
         # 2. Fallback to DB
-        # We do NOT log a warning here to avoid scaring the user; it's a valid fallback.
         return fetch_inventory_from_db()
 
 @st.cache_data(ttl=3600)
@@ -169,16 +183,20 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             st.warning(f"No data found for {selected_name} (checked GitHub & DB).")
             return
 
-        # Check source (Implicitly via checking session state or just rendering)
-        # We don't explicitly show "Source: DB" vs "Source: GitHub" to keep UI clean,
-        # but the speed difference will be noticeable.
+        # --- FIX: Prepare data for Plotly ---
+        # Convert lists to strings to ensure they are hashable for aggregation
+        if 'id_list' in df.columns:
+            df['id_list_str'] = df['id_list'].astype(str)
+            hover_cols = ['id_list_str']
+        else:
+            hover_cols = None
 
         fig = px.sunburst(
             df, 
             path=['edge', 'node', 'node_name'], 
             values='count',
             color='edge',
-            hover_data=['id_list']
+            hover_data=hover_cols
         )
         fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
         st.plotly_chart(fig, use_container_width=True)
@@ -842,7 +860,7 @@ if not st.session_state.app_state["connected"]:
 else:
     nav = st.sidebar.radio("Navigation", ["Databook", "Search", "Locker", "Analysis"])
     
-    # UPDATED NAVIGATION: Use the imported explorer component
+    # UPDATED NAVIGATION: Call the local function directly
     if nav == "Databook": 
         screen_databook()
             
@@ -854,4 +872,3 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.app_state["connected"] = False
         st.rerun()
-
