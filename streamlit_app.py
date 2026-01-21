@@ -166,6 +166,7 @@ def fetch_sunburst_data(selector_type: str, label: str, name: str) -> pd.DataFra
 # ==========================================
 
 @st.fragment
+@st.fragment
 def render_explorer_workspace(selector_type, selected_label, selected_name):
     c_mid, c_right = st.columns([2, 1])
     
