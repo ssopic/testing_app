@@ -101,7 +101,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
         labels(m)[0] as node, 
         coalesce(m.name, 'Unknown') as node_name, 
         count(r) as count,
-        collect(r.source_pks) as id_list
+        collect(coalesce(r.source_pks, r.doc_id)))
     """
     
     try:
