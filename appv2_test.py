@@ -13,6 +13,296 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, Field, ValidationError
 
+# ---Visualization and url parsing ---
+import plotly.express as px
+import urllib.parse
+
+
+
+# ==========================================
+### NEW DATABOOK ###
+# ==========================================
+# 1. FALLBACK DB FUNCTIONS
+# ==========================================
+
+def get_db_driver():
+    """Retrieves the cached driver from the main app state."""
+    if "app_state" in st.session_state and "neo4j_creds" in st.session_state.app_state:
+        creds = st.session_state.app_state["neo4j_creds"]
+        uri = creds.get("uri")
+        auth = creds.get("auth")
+        if uri and auth:
+            # We assume the main app has already validated this driver
+            # Ideally, we reuse the exact object, but creating a lightweight driver here is safe
+            # if we trust the credentials.
+            return GraphDatabase.driver(uri, auth=auth)
+    return None
+
+def fetch_inventory_from_db():
+    """Fallback: Generates the inventory dict by querying the live DB."""
+    inventory = {"Object": {}, "Verb": {}, "Lexical": {}}
+    driver = get_db_driver()
+    
+    if not driver:
+        return {}
+        
+    try:
+        with driver.session() as session:
+            # 1. POPULATE OBJECTS (Nodes)
+            labels_result = session.run("CALL db.labels()")
+            labels = [r[0] for r in labels_result]
+            
+            for label in labels:
+                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name LIMIT 50"
+                names = [r["name"] for r in session.run(q)]
+                if names:
+                    inventory["Object"][label] = sorted(names)
+
+            # 2. POPULATE VERBS (Relationships)
+            # We list the Relationship Types as the "Labels"
+            rels_result = session.run("CALL db.relationshipTypes()")
+            rels = [r[0] for r in rels_result]
+            
+            for r_type in rels:
+                # For relationships, we might not have a "name", so we leave the list empty 
+                # or we could fetch distinct properties if your schema supports it.
+                # This ensures the 'Verb' menu at least shows the types.
+                inventory["Verb"][r_type] = [] 
+
+            # 3. POPULATE LEXICAL
+            # Assuming 'MENTIONED_IN' or similar for lexical graph
+            # We can just initialize it or check if specific nodes exist
+            inventory["Lexical"]["Document"] = []
+
+    except Exception as e:
+        st.warning(f"DB Fallback failed: {e}")
+    finally:
+        driver.close()
+        
+    return inventory
+
+def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.DataFrame:
+    """
+    Fallback: Generates the DataFrame by running a live Cypher query.
+    Mimics the structure: [edge, node, node_name, id_list, count]
+    """
+    driver = get_db_driver()
+    if not driver:
+        return pd.DataFrame()
+
+    # Cypher query to aggregate neighbors
+    # We collect IDs to populate the 'id_list' expected by the UI
+    # We assume 'source_pks' or 'doc_id' exists, otherwise we use internal ID
+    query = f"""
+    MATCH (n:`{label}`)-[r]->(m)
+    WHERE n.name = $name
+    RETURN 
+        type(r) as edge, 
+        labels(m)[0] as node, 
+        coalesce(m.name, 'Unknown') as node_name, 
+        count(r) as count,
+        collect(coalesce(r.source_pks, r.doc_id, toString(id(r)))) as id_list
+    """
+    
+    try:
+        with driver.session() as session:
+            result = session.run(query, name=name)
+            data = [r.data() for r in result]
+            return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"Live Query failed: {e}")
+        return pd.DataFrame()
+    finally:
+        driver.close()
+
+# ==========================================
+# 2. HYBRID FETCHERS (GITHUB -> DB)
+# ==========================================
+
+@st.cache_data(ttl=3600)
+def fetch_inventory() -> dict:
+    """
+    Hybrid Fetcher:
+    1. Try GitHub (Fast, Static)
+    2. Fallback to DB (Slower, Fresh)
+    """
+    # 1. Try GitHub
+    url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/inventory.json"
+    try:
+        response = pd.read_json(url)
+        return response.to_dict()
+    except Exception:
+        # 2. Fallback to DB
+        return fetch_inventory_from_db()
+
+@st.cache_data(ttl=3600)
+def fetch_sunburst_data(selector_type: str, label: str, name: str) -> pd.DataFrame:
+    """
+    Hybrid Fetcher:
+    1. Try GitHub JSON
+    2. Fallback to Live Cypher
+    """
+    base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
+    
+    prefix_map = {"Object": "node", "Verb": "relationship", "Lexical": "lexical"}
+    file_prefix = prefix_map.get(selector_type, "node")
+    
+    safe_label = label.lower().strip()
+    safe_name = urllib.parse.quote(name.strip()) 
+    
+    filename = f"{file_prefix}_{safe_label}_{safe_name}.json"
+    full_url = f"{base_url}{filename}"
+    
+    try:
+        df = pd.read_json(full_url)
+        if df.empty: raise ValueError("Empty JSON")
+        return df
+    except Exception:
+        # Fallback to DB
+        return fetch_sunburst_from_db(selector_type, label, name)
+
+# ==========================================
+# 3. FRAGMENT: WORKSPACE
+# ==========================================
+
+@st.fragment
+def render_explorer_workspace(selector_type, selected_label, selected_name):
+    c_mid, c_right = st.columns([2, 1])
+    
+    with c_mid:
+        if not selected_name:
+            st.info("👈 Select an entity from the left to explore.")
+            return
+
+        st.subheader(f"{selected_name}")
+        
+        # Fetch Data (Hybrid)
+        df = fetch_sunburst_data(selector_type, selected_label, selected_name)
+
+        if df.empty:
+            st.warning(f"No data found for {selected_name} (checked GitHub & DB).")
+            return
+
+        # --- FIX: Prepare data for Plotly ---
+        # Convert lists to strings to ensure they are hashable for aggregation
+        if 'id_list' in df.columns:
+            df['id_list_str'] = df['id_list'].astype(str)
+            hover_cols = ['id_list_str']
+        else:
+            hover_cols = None
+
+        fig = px.sunburst(
+            df, 
+            path=['edge', 'node', 'node_name'], 
+            values='count',
+            color='edge',
+            hover_data=hover_cols
+        )
+        fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c_right:
+        st.subheader("Extraction")
+        st.caption("Select data to add to Evidence Locker")
+
+        all_ids = []
+        if 'id_list' in df.columns:
+            for ids in df['id_list']:
+                if isinstance(ids, list):
+                    all_ids.extend(ids)
+                else:
+                    all_ids.append(ids)
+        
+        unique_ids = list(set(all_ids))
+        
+        st.metric("Documents Found", len(unique_ids))
+        with st.expander("Preview ID List", expanded=False):
+            st.write(unique_ids)
+
+        if st.button("Add to Locker", type="primary", use_container_width=True):
+            if not unique_ids:
+                st.error("No documents to add.")
+            else:
+                payload = {
+                    "query": f"Manual Explorer: {selected_label} -> {selected_name}",
+                    "answer": f"Visual discovery via {selector_type} found {len(unique_ids)} related documents.",
+                    "ids": [str(uid) for uid in unique_ids]
+                }
+                
+                if "evidence_locker" not in st.session_state.app_state:
+                    st.session_state.app_state["evidence_locker"] = []
+                    
+                st.session_state.app_state["evidence_locker"].append(payload)
+                st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
+                
+        current_count = len(st.session_state.app_state.get("evidence_locker", []))
+        st.caption(f"Total items in Locker: {current_count}")
+
+# ==========================================
+# 4. MAIN SCREEN CONTROLLER
+# ==========================================
+
+def screen_databook():
+    st.title("🧭 The Databook Explorer")
+    
+    # Hybrid Fetch
+    inventory = fetch_inventory()
+    
+    if not inventory:
+        st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
+    
+    c_left, c_workspace = st.columns([1, 3])
+
+    with c_left:
+        with st.container(border=True):
+            st.subheader("Selector")
+            
+            selector_type = st.radio(
+                "Analysis Mode", 
+                ["Object", "Verb", "Lexical"], 
+                captions=["Node-Centric", "Relationship-Centric", "Text-Mentions"],
+                horizontal=True
+            )
+            st.divider()
+            
+            selected_label = None
+            selected_name = None
+
+            available_data = inventory.get(selector_type, {})
+            
+            if not available_data:
+                st.caption(f"No inventory for {selector_type}.")
+                # If falling back to DB, 'Object' might be populated but 'Verb' empty.
+            else:
+                if isinstance(available_data, dict):
+                    labels = sorted(list(available_data.keys()))
+                    for label in labels:
+                        with st.expander(f"{label}"):
+                            names = available_data[label]
+                            names = sorted(names) if isinstance(names, list) else []
+                            
+                            if names:
+                                selection = st.radio(
+                                    "Select Entity:", 
+                                    names, 
+                                    key=f"sel_{selector_type}_{label}", 
+                                    index=None
+                                )
+                                if selection:
+                                    selected_label = label
+                                    selected_name = selection
+                            else:
+                                st.caption("No names listed.")
+                else:
+                    st.error("Invalid inventory format.")
+
+    with c_workspace:
+        render_explorer_workspace(selector_type, selected_label, selected_name)
+
+# ==========================================
+# 0. NON UPDATED PARTS
+# ==========================================
+
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
 
@@ -48,7 +338,8 @@ def load_github_data():
     url = "https://raw.githubusercontent.com/ssopic/some_data/main/sum_data.csv"
     try:
         df = pd.read_csv(url)
-        df['PK'] = df['PK'].astype(str)
+        # Robust cleaning: convert to string, remove potential '.0' from floats, and strip whitespace
+        df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         return df
     except Exception as e:
         return pd.DataFrame(columns=['PK', 'details'])
@@ -128,7 +419,6 @@ SYSTEM_PROMPTS = {
         "2. EXACT RETURN: Once you identify the match, return the string EXACTLY as it appears in FULL_SCHEMA.\n"
         "3. PROPERTY AWARENESS: Pass the valid property lists. This prevents the generator from inventing properties like '.type' or '.status' if they don't exist."
     ),
-    # The grounding Agent has been modified to never use ANY other labels and properties other than for the persons name.  
     "Grounding Agent": (
         "You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.\n"
         "CHAIN OF THOUGHT (Required):\n"
@@ -140,15 +430,6 @@ SYSTEM_PROMPTS = {
         "PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results. .\n"
         "PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'document'.\n"        
         "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
-
-# Old variant saved for a version when the nodes are properly cleaned       
-#        "1. Analyze Entities: Is 'Island' a Person or a Location? Check the Schema labels.\n"
-#        "2. Check Properties: Does the `PERSON` label have a 'type' property? If no, do not use `n.type`.\n"
-#        "3. Define Path: If the destination is a Location, ensure the path includes a node with that Label (e.g., `(p)-[:MOVED]->(l:LOCATION)`).\n\n"
-#        "TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.\n"
-#        "MULTI-HOP: The 'proposed_relationships' list (e.g., ['paid', 'visited']) must be mapped to the valid schema types provided in the SCHEMA list.\n"
-#        "PROVENANCE: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks, r.doc_id)` to handle both fields.\n"
-#        "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
     ),
     "Cypher Generator": (
         "You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query. "
@@ -243,18 +524,24 @@ def fetch_schema_statistics(uri: str, auth: tuple) -> Dict[str, Any]:
         if driver: driver.close()
     return stats
 
-def extract_provenance_from_result(result: Dict) -> List[str]:
-    """Scans JSON recursively for any keys containing 'provenance'."""
+def extract_provenance_from_result(result: Union[Dict, List]) -> List[str]:
+    """Scans JSON recursively for keys indicating ID storage (provenance, pks, doc_id)."""
     ids = []
+    # Broader set of keywords to catch un-aliased returns like 'r.source_pks'
+    target_keys = ["provenance", "source_pks", "doc_id", "id_list", "pk"]
+    
     def recurse(data):
         if isinstance(data, dict):
             for k, v in data.items():
-                if "provenance" in k.lower():
+                # Check if ANY target key matches the result key (case-insensitive)
+                if any(t in k.lower() for t in target_keys):
                     if isinstance(v, list): ids.extend([str(i) for i in v])
                     else: ids.append(str(v))
-                else: recurse(v)
+                else: 
+                    recurse(v)
         elif isinstance(data, list):
             for item in data: recurse(item)
+            
     recurse(result)
     return list(set(ids))
 
@@ -430,80 +717,6 @@ def screen_connection():
                     st.rerun()
                 else: st.error(stats.get("error"))
 
-# FRAGMENT: Updates only this section when clicking preview
-@st.fragment
-def screen_databook():
-    st.title("📚 The Databook")
-    # FIX: Access schema_stats from app_state
-    stats = st.session_state.app_state["schema_stats"]
-    
-    if stats.get("status") != "SUCCESS":
-        st.error("Failed to load schema.")
-        return
-
-    # Unified Filter for both columns
-    filter_text = st.text_input("Filter Labels & Types", placeholder="e.g. Person")
-
-    col_nodes, col_rels = st.columns(2)
-
-    # --- LEFT COLUMN: NODES (Advanced Features) ---
-    with col_nodes:
-        st.subheader("Nodes")
-        labels = stats.get("NodeLabels", [])
-        if filter_text:
-            labels = [l for l in labels if filter_text.lower() in l.lower()]
-        
-        for label in labels:
-            count = stats["NodeCounts"].get(label, 0)
-            with st.expander(f"📦 {label} ({count:,})"):
-                st.caption(f"Properties: {', '.join(stats['NodeProperties'].get(label, [])[:5])}...")
-                
-                # --- ADVANCED SHOWCASING RESTORED ---
-                # 1. Search Bar specific to this node type
-                node_search = st.text_input(f"Search {label}", key=f"s_{label}", placeholder="Value to find...")
-                limit = st.selectbox("Limit", [5, 10, 50], key=f"l_{label}")
-                
-                if st.button(f"Fetch Data", key=f"b_{label}"):
-                    # FIX: Credentials from app_state
-                    creds = st.session_state.app_state["neo4j_creds"]
-                    driver = get_cached_driver(creds["uri"], creds["auth"])
-                    
-                    if driver:
-                        with driver.session() as session:
-                            if node_search:
-                                # Advanced Query: Search ANY property for the term
-                                query = f"""
-                                MATCH (n:`{label}`) 
-                                WHERE any(prop in keys(n) WHERE toString(n[prop]) CONTAINS $term)
-                                RETURN n LIMIT toInteger($limit)
-                                """
-                                params = {"term": node_search, "limit": limit}
-                            else:
-                                # Standard Fetch
-                                query = f"MATCH (n:`{label}`) RETURN n LIMIT toInteger($limit)"
-                                params = {"limit": limit}
-                            
-                            results = session.run(query, params)
-                            data = [r["n"] for r in results]
-                            
-                            if data:
-                                # Render as interactive Table
-                                st.dataframe(pd.DataFrame(data), use_container_width=True)
-                            else:
-                                st.info("No results found.")
-
-    # --- RIGHT COLUMN: RELATIONSHIPS ---
-    with col_rels:
-        st.subheader("Relationships")
-        rels = stats.get("RelationshipTypes", [])
-        if filter_text:
-            rels = [r for r in rels if filter_text.lower() in r.lower()]
-            
-        for rtype in rels:
-            with st.expander(f"🔗 {rtype}"):
-                st.write("**Verbs:**", stats["RelationshipVerbs"].get(rtype, []))
-                st.write("**Properties:**", stats["RelationshipProperties"].get(rtype, []))
-
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
@@ -512,7 +725,7 @@ def screen_extraction():
     # 1. Define Tabs
     tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
     
-    # --- TAB 1: EXISTING AGENT CHAT ---
+    # --- TAB 1: EXISTING AGENT CHAT (Preserved) ---
     with tab_chat:
         # Check Connections using credentials from app_state
         creds = st.session_state.app_state["neo4j_creds"]
@@ -540,48 +753,44 @@ def screen_extraction():
                 with st.spinner("Analyzing public dataset..."):
                     result = pipeline.run(user_msg)
                     
-                    # --- ERROR HANDLING FIX START ---
                     if result.get("status") == "ERROR":
                         err_msg = result.get("error", "Unknown Error")
                         st.error(f"Pipeline Error: {err_msg}")
-                        # Optionally add technical details
                         with st.expander("Technical Details"):
                             st.write(result)
                     else:
-                        # Success Path
                         ans = result.get("final_answer", "No answer generated.")
                         st.write(ans)
                         
-                        # Show Cypher if available (Debugging)
                         if result.get("cypher_query"):
                             with st.expander("Generated Cypher"):
                                 st.code(result["cypher_query"], language="cypher")
 
-                        # Save answer to app_state
                         st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
                         
                         if result.get("proof_ids"):
-                            # Save evidence to app_state
                             st.session_state.app_state["evidence_locker"].append({
                                 "query": user_msg, "answer": ans, "ids": result["proof_ids"]
                             })
                             st.toast("Evidence saved to locker")
-                    # --- ERROR HANDLING FIX END ---
 
-    # --- TAB 2: RAW CYPHER INPUT (NEW) ---
+    # --- TAB 2: RAW CYPHER INPUT (Updated with Save Logic) ---
     with tab_cypher:
         st.markdown("### Safe Cypher Execution")
         st.caption("Read-Only mode active. Modifications (CREATE, SET, DELETE) are blocked.")
         
-        # Default query to help the user start
+        # State container for manual query results
+        if "manual_results" not in st.session_state:
+            st.session_state.manual_results = None
+        if "manual_query_text" not in st.session_state:
+            st.session_state.manual_query_text = ""
+
         cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n LIMIT 5")
         
         if st.button("Run Query"):
-            # A. Security Check
             if SAFETY_REGEX.search(cypher_input):
-                st.error("🚨 SECURITY ALERT: destructive commands (DELETE, MERGE, etc.) are not allowed.")
+                st.error("🚨 SECURITY ALERT: destructive commands are not allowed.")
             else:
-                # B. Execution
                 creds = st.session_state.app_state["neo4j_creds"]
                 driver = get_cached_driver(creds["uri"], creds["auth"])
                 
@@ -591,13 +800,36 @@ def screen_extraction():
                             res = session.run(cypher_input)
                             data = [r.data() for r in res]
                             
-                            if data:
-                                st.dataframe(pd.DataFrame(data), use_container_width=True)
-                                st.success(f"Returned {len(data)} records.")
-                            else:
+                            # Save to temporary state for the 'Save' button to access
+                            st.session_state.manual_results = data
+                            st.session_state.manual_query_text = cypher_input
+                            
+                            if not data:
                                 st.warning("Query returned no results.")
                     except Exception as e:
                         st.error(f"Cypher Syntax Error: {e}")
+
+        # Display Results & Save Button (Persistent across reruns in fragment)
+        if st.session_state.manual_results:
+            st.divider()
+            st.subheader("Results")
+            st.dataframe(pd.DataFrame(st.session_state.manual_results), use_container_width=True)
+            
+            # Helper to count IDs found
+            found_ids = extract_provenance_from_result(st.session_state.manual_results)
+            st.caption(f"Found {len(found_ids)} potential document IDs.")
+            
+            if st.button("💾 Add Results to Locker"):
+                if found_ids:
+                    payload = {
+                        "query": f"Manual Cypher: {st.session_state.manual_query_text[:30]}...",
+                        "answer": "Manually executed Cypher query results.",
+                        "ids": found_ids
+                    }
+                    st.session_state.app_state["evidence_locker"].append(payload)
+                    st.toast(f"Saved {len(found_ids)} IDs to Locker!")
+                else:
+                    st.warning("No IDs (provenance/source_pks) found in these results to save.")
 
 @st.fragment
 def screen_locker():
@@ -608,17 +840,36 @@ def screen_locker():
         st.info("Locker is empty.")
         return
 
+    # 1. Initialize local selection set
+    current_selection = set()
+    
+    # 2. Retrieve previously selected IDs to restore checkbox state
+    global_selected = st.session_state.app_state.get("selected_ids", set())
+
     for i, entry in enumerate(locker):
         with st.container(border=True):
             c1, c2 = st.columns([0.1, 0.9])
             with c1:
-                # Use a unique key for every checkbox to avoid state conflict in fragment
-                is_sel = st.checkbox("Select", key=f"sel_{i}")
+                # 3. Logic: If the entry's IDs are already in the global set, check the box.
+                # We convert entry IDs to a set of strings to compare.
+                entry_ids_str = {str(pid) for pid in entry["ids"]}
+                
+                # Check if this batch is already selected (subset of global selection)
+                is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
+                # 4. Render Checkbox with `value=` set to restored state
+                is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
+                
                 if is_sel: 
-                    for pid in entry["ids"]: st.session_state.app_state["selected_ids"].add(pid)
+                    # If checked (either by user or restored state), add to current set
+                    for pid in entry["ids"]: 
+                        current_selection.add(str(pid))
             with c2:
                 st.write(f"**Query:** {entry['query']}")
                 st.caption(f"Found IDs: {', '.join(entry['ids'])}")
+
+    # 5. Commit to Global State
+    st.session_state.app_state["selected_ids"] = current_selection
 
 @st.fragment
 def screen_analysis():
@@ -653,7 +904,11 @@ if not st.session_state.app_state["connected"]:
     screen_connection()
 else:
     nav = st.sidebar.radio("Navigation", ["Databook", "Search", "Locker", "Analysis"])
-    if nav == "Databook": screen_databook()
+    
+    # UPDATED NAVIGATION: Call the local function directly
+    if nav == "Databook": 
+        screen_databook()
+            
     elif nav == "Search": screen_extraction()
     elif nav == "Locker": screen_locker()
     elif nav == "Analysis": screen_analysis()
