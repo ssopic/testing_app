@@ -271,7 +271,6 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
 def screen_databook():
     st.title("🧭 The Databook Explorer")
     
-    # Hybrid Fetch
     inventory = fetch_inventory()
     
     if not inventory:
@@ -294,37 +293,41 @@ def screen_databook():
             selected_label = None
             selected_name = None
 
-            available_data = inventory.get(selector_type, {})
-            
-            if not available_data:
-                st.caption(f"No inventory for {selector_type}.")
-                # If falling back to DB, 'Object' might be populated but 'Verb' empty.
-            else:
-                if isinstance(available_data, dict):
-                    labels = sorted(list(available_data.keys()))
-                    for label in labels:
-                        with st.expander(f"{label}"):
-                            names = available_data[label]
-                            names = sorted(names) if isinstance(names, list) else []
-                            
-                            if names:
-                                selection = st.radio(
-                                    "Select Entity:", 
-                                    names, 
-                                    key=f"sel_{selector_type}_{label}", 
-                                    index=None
-                                )
-                                if selection:
-                                    selected_label = label
-                                    selected_name = selection
-                            else:
-                                st.caption("No names listed.")
+            # --- LAYOUT FIX: Scrollable Container ---
+            # We wrap the dynamic list generation in a container with a fixed height (e.g., 600px).
+            # This makes the list scrollable internally, keeping the page height stable 
+            # so the chart on the right stays in view.
+            with st.container(height=600, border=False):
+                available_data = inventory.get(selector_type, {})
+                
+                if not available_data:
+                    st.caption(f"No inventory for {selector_type}.")
                 else:
-                    st.error("Invalid inventory format.")
+                    if isinstance(available_data, dict):
+                        labels = sorted(list(available_data.keys()))
+                        for label in labels:
+                            with st.expander(f"{label}"):
+                                names = available_data[label]
+                                names = sorted(names) if isinstance(names, list) else []
+                                
+                                if names:
+                                    # Unique key generation to avoid conflicts
+                                    selection = st.radio(
+                                        "Select Entity:", 
+                                        names, 
+                                        key=f"sel_{selector_type}_{label}", 
+                                        index=None
+                                    )
+                                    if selection:
+                                        selected_label = label
+                                        selected_name = selection
+                                else:
+                                    st.caption("No names listed.")
+                    else:
+                        st.error("Invalid inventory format.")
 
     with c_workspace:
         render_explorer_workspace(selector_type, selected_label, selected_name)
-
 # ==========================================
 # 0. NON UPDATED PARTS
 # ==========================================
