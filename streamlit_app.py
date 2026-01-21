@@ -53,7 +53,7 @@ def fetch_inventory_from_db():
             labels = [r[0] for r in labels_result]
             
             for label in labels:
-                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name LIMIT 50"
+                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name"
                 names = [r["name"] for r in session.run(q)]
                 if names:
                     inventory["Object"][label] = sorted(names)
