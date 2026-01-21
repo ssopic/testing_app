@@ -98,8 +98,8 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
     WHERE n.name = $name
     RETURN 
         type(r) as edge, 
-        labels(m)[0] as node, 
-        coalesce(m.name, 'Unknown') as node_name, 
+        labels(n)[0] as node, 
+        coalesce(n.name, 'Unknown') as node_name, 
         count(r) as count,
         collect(coalesce(r.source_pks, r.doc_id))) as id_list
     """
