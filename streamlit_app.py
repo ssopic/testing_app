@@ -205,17 +205,13 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
         st.subheader("Extraction")
         st.caption("Select data to add to Evidence Locker")
 
-        # Helper to recursively flatten lists (Cypher collect(list) returns list of lists)
-        def deep_flatten(container):
-            for i in container:
-                if isinstance(i, list):
-                    yield from deep_flatten(i)
-                elif pd.notna(i) and i != "": # Filter out nulls/empty
-                    yield str(i) # Ensure string format for ID matching
-
         all_ids = []
         if 'id_list' in df.columns:
-            all_ids = list(deep_flatten(df['id_list']))
+            for ids in df['id_list']:
+                if isinstance(ids, list):
+                    all_ids.extend(ids)
+                else:
+                    all_ids.append(ids)
         
         unique_ids = list(set(all_ids))
         
