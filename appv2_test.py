@@ -53,7 +53,7 @@ def fetch_inventory_from_db():
             labels = [r[0] for r in labels_result]
             
             for label in labels:
-                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name LIMIT 50"
+                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name"
                 names = [r["name"] for r in session.run(q)]
                 if names:
                     inventory["Object"][label] = sorted(names)
@@ -98,10 +98,10 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
     WHERE n.name = $name
     RETURN 
         type(r) as edge, 
-        labels(m)[0] as node, 
-        coalesce(m.name, 'Unknown') as node_name, 
+        labels(n)[0] as node, 
+        coalesce(n.name, 'Unknown') as node_name, 
         count(r) as count,
-        collect(coalesce(r.source_pks, r.doc_id, toString(id(r)))) as id_list
+        collect(coalesce(r.source_pks, m.doc_id)) as id_list
     """
     
     try:
@@ -183,8 +183,7 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             st.warning(f"No data found for {selected_name} (checked GitHub & DB).")
             return
 
-        # --- FIX: Prepare data for Plotly ---
-        # Convert lists to strings to ensure they are hashable for aggregation
+        # Prepare data for Plotly
         if 'id_list' in df.columns:
             df['id_list_str'] = df['id_list'].astype(str)
             hover_cols = ['id_list_str']
@@ -205,13 +204,35 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
         st.subheader("Extraction")
         st.caption("Select data to add to Evidence Locker")
 
+        # --- UPDATED: Filtering Logic ---
+        
+        # 1. Get available edge types from the current dataframe
+        edge_options = sorted(df['edge'].unique())
+        
+        # 2. Filter Dropdown
+        selected_edge_filter = st.selectbox(
+            "Filter by Relationship:",
+            ["All"] + edge_options,
+            help="Narrow down the evidence to specific relationship types."
+        )
+
+        # 3. Apply Filter to Create a Temporary DataFrame
+        if selected_edge_filter == "All":
+            filtered_df = df
+        else:
+            filtered_df = df[df['edge'] == selected_edge_filter]
+
+        # 4. Flatten IDs (using filtered_df)
+        def deep_flatten(container):
+            for i in container:
+                if isinstance(i, list):
+                    yield from deep_flatten(i)
+                elif pd.notna(i) and i != "":
+                    yield str(i)
+
         all_ids = []
-        if 'id_list' in df.columns:
-            for ids in df['id_list']:
-                if isinstance(ids, list):
-                    all_ids.extend(ids)
-                else:
-                    all_ids.append(ids)
+        if 'id_list' in filtered_df.columns:
+            all_ids = list(deep_flatten(filtered_df['id_list']))
         
         unique_ids = list(set(all_ids))
         
@@ -223,8 +244,13 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
+                # Update payload query to reflect the filter choice
+                query_desc = f"Manual Explorer: {selected_label} -> {selected_name}"
+                if selected_edge_filter != "All":
+                    query_desc += f" (Only {selected_edge_filter})"
+
                 payload = {
-                    "query": f"Manual Explorer: {selected_label} -> {selected_name}",
+                    "query": query_desc,
                     "answer": f"Visual discovery via {selector_type} found {len(unique_ids)} related documents.",
                     "ids": [str(uid) for uid in unique_ids]
                 }
@@ -237,7 +263,7 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
                 
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
         st.caption(f"Total items in Locker: {current_count}")
-
+        
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
 # ==========================================
