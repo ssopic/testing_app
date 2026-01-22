@@ -82,21 +82,19 @@ def fetch_inventory_from_db():
     return inventory
 
 
-def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.DataFrame:
+def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
     """
-    Fallback: Generates the DataFrame by running a live Cypher query.
+    Fallback: Generates the DataFrame by running a live Cypher query for MULTIPLE names.
     Aggregates by Edge Type AND Connected Node Label.
     """
     driver = get_db_driver()
-    if not driver:
+    if not driver or not names:
         return pd.DataFrame()
 
-    # UPDATED QUERY:
-    # Groups by Source Node, Edge Type, AND Target Node Label.
-    # This creates the hierarchy: Source Name -> Relationship -> Target Type
+    # UPDATED QUERY: Uses 'IN' clause for multiple names
     query = f"""
     MATCH (n:`{label}`)-[r]->(m)
-    WHERE n.name = $name
+    WHERE n.name IN $names
     RETURN 
         type(r) as edge, 
         labels(n)[0] as node, 
@@ -108,7 +106,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
     
     try:
         with driver.session() as session:
-            result = session.run(query, name=name)
+            result = session.run(query, names=names)
             data = [r.data() for r in result]
             return pd.DataFrame(data)
     except Exception as e:
@@ -137,51 +135,78 @@ def fetch_inventory() -> dict:
         return fetch_inventory_from_db()
 
 @st.cache_data(ttl=3600)
-def fetch_sunburst_data(selector_type: str, label: str, name: str) -> pd.DataFrame:
+def fetch_sunburst_data(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
     """
-    Hybrid Fetcher:
-    1. Try GitHub JSON
-    2. Fallback to Live Cypher
+    Hybrid Fetcher for Multiple Nodes:
+    1. Iterates through the list of names.
+    2. Tries to fetch GitHub JSON for each.
+    3. If GitHub fails for specific names, it falls back to DB for those specific names (or the whole batch).
+    4. Returns a concatenated DataFrame.
     """
+    if not names:
+        return pd.DataFrame()
+
     base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
-    
     prefix_map = {"Object": "node", "Verb": "relationship", "Lexical": "lexical"}
     file_prefix = prefix_map.get(selector_type, "node")
-    
     safe_label = label.lower().strip()
-    safe_name = urllib.parse.quote(name.strip()) 
+
+    dfs = []
+    missing_names = []
+
+    # 1. Try GitHub for each name individually
+    for name in names:
+        safe_name = urllib.parse.quote(name.strip())
+        filename = f"{file_prefix}_{safe_label}_{safe_name}.json"
+        full_url = f"{base_url}{filename}"
+        
+        try:
+            df_part = pd.read_json(full_url)
+            if not df_part.empty:
+                dfs.append(df_part)
+            else:
+                missing_names.append(name)
+        except:
+            missing_names.append(name)
+
+    # 2. Fallback to DB for any missing names
+    if missing_names:
+        # We fetch the missing batch from DB
+        df_db = fetch_sunburst_from_db(selector_type, label, missing_names)
+        if not df_db.empty:
+            dfs.append(df_db)
+
+    # 3. Combine results
+    if not dfs:
+        return pd.DataFrame()
     
-    filename = f"{file_prefix}_{safe_label}_{safe_name}.json"
-    full_url = f"{base_url}{filename}"
-    
-    try:
-        df = pd.read_json(full_url)
-        if df.empty: raise ValueError("Empty JSON")
-        return df
-    except Exception:
-        # Fallback to DB
-        return fetch_sunburst_from_db(selector_type, label, name)
+    return pd.concat(dfs, ignore_index=True)
 
 # ==========================================
 # 3. FRAGMENT: WORKSPACE
 # ==========================================
 
 @st.fragment
-def render_explorer_workspace(selector_type, selected_label, selected_name):
+def render_explorer_workspace(selector_type, selected_label, selected_names):
     c_mid, c_right = st.columns([2, 1])
     
     with c_mid:
-        if not selected_name:
-            st.info("👈 Select an entity from the left to explore.")
+        if not selected_names:
+            st.info("👈 Select entities from the left and click 'Visualize' to explore.")
             return
 
-        st.subheader(f"{selected_name}")
+        # Header logic for multiple names
+        if len(selected_names) == 1:
+            st.subheader(f"{selected_names[0]}")
+        else:
+            st.subheader(f"Combined Analysis ({len(selected_names)} Entities)")
+            st.caption(f"Includes: {', '.join(selected_names[:3])}" + ("..." if len(selected_names) > 3 else ""))
         
-        # Fetch Data (Hybrid)
-        df = fetch_sunburst_data(selector_type, selected_label, selected_name)
+        # Fetch Data (Hybrid Multi)
+        df = fetch_sunburst_data(selector_type, selected_label, selected_names)
 
         if df.empty:
-            st.warning(f"No data found for {selected_name} (checked GitHub & DB).")
+            st.warning(f"No data found for selection.")
             return
 
         # Prepare data for Plotly
@@ -191,10 +216,8 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
         else:
             hover_cols = None
 
-        # --- UPDATE: Sunburst Hierarchy ---
-        # Path: Node Name (Center) -> Edge (Ring 1) -> Target Label (Ring 2)
-        # Note: We use 'node_name' as the root. If the DF has multiple 'connected_node_label' values
-        # for the same edge, Plotly splits the ring accordingly.
+        # Sunburst: The 'node_name' column will naturally create separate sectors 
+        # for each source entity at the center if multiple names are selected.
         fig = px.sunburst(
             df, 
             path=['node_name', 'edge', 'connected_node_label'], 
@@ -209,9 +232,7 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
         st.subheader("Extraction")
         st.caption("Select data to add to Evidence Locker")
 
-        # --- UPDATE: Cascading Filters ---
-        
-        # 1. Edge Filter
+        # --- Cascading Filters ---
         edge_options = sorted(df['edge'].unique())
         selected_edge_filter = st.selectbox(
             "Filter by Relationship:",
@@ -219,13 +240,10 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             key="filter_edge"
         )
 
-        # 2. Target Label Filter (Dynamic based on edge selection)
         if selected_edge_filter == "All":
-            # Show all possible target labels if no edge is selected
             target_options = sorted(df['connected_node_label'].unique())
             filtered_df_step1 = df
         else:
-            # Show only target labels relevant to the selected edge
             filtered_df_step1 = df[df['edge'] == selected_edge_filter]
             target_options = sorted(filtered_df_step1['connected_node_label'].unique())
 
@@ -235,13 +253,12 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             key="filter_target"
         )
 
-        # 3. Apply Final Filter
         if selected_target_filter == "All":
             final_filtered_df = filtered_df_step1
         else:
             final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'] == selected_target_filter]
 
-        # 4. Flatten IDs
+        # Flatten IDs
         def deep_flatten(container):
             for i in container:
                 if isinstance(i, list):
@@ -263,8 +280,13 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
-                # Construct descriptive query string
-                query_desc = f"Manual Explorer: {selected_label} -> {selected_name}"
+                # Construct query description
+                if len(selected_names) > 1:
+                    name_str = "Combined Group"
+                else:
+                    name_str = selected_names[0]
+                    
+                query_desc = f"Manual Explorer: {selected_label} -> {name_str}"
                 filters = []
                 if selected_edge_filter != "All":
                     filters.append(f"Edge: {selected_edge_filter}")
@@ -298,6 +320,12 @@ def screen_databook():
     
     inventory = fetch_inventory()
     
+    # Initialize session state for active selection if not present
+    if "active_explorer_label" not in st.session_state:
+        st.session_state.active_explorer_label = None
+    if "active_explorer_names" not in st.session_state:
+        st.session_state.active_explorer_names = []
+
     if not inventory:
         st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
     
@@ -314,14 +342,8 @@ def screen_databook():
                 horizontal=True
             )
             st.divider()
-            
-            selected_label = None
-            selected_name = None
 
-            # --- LAYOUT FIX: Scrollable Container ---
-            # We wrap the dynamic list generation in a container with a fixed height (e.g., 600px).
-            # This makes the list scrollable internally, keeping the page height stable 
-            # so the chart on the right stays in view.
+            # Scrollable Container
             with st.container(height=600, border=False):
                 available_data = inventory.get(selector_type, {})
                 
@@ -336,23 +358,29 @@ def screen_databook():
                                 names = sorted(names) if isinstance(names, list) else []
                                 
                                 if names:
-                                    # Unique key generation to avoid conflicts
-                                    selection = st.radio(
-                                        "Select Entity:", 
+                                    # MULTI-SELECT WIDGET
+                                    selection = st.multiselect(
+                                        "Select Entities:", 
                                         names, 
-                                        key=f"sel_{selector_type}_{label}", 
-                                        index=None
+                                        key=f"sel_{selector_type}_{label}"
                                     )
-                                    if selection:
-                                        selected_label = label
-                                        selected_name = selection
+                                    
+                                    # VISUALIZE BUTTON (Submits the selection)
+                                    if st.button("Visualize", key=f"btn_{selector_type}_{label}"):
+                                        st.session_state.active_explorer_label = label
+                                        st.session_state.active_explorer_names = selection
                                 else:
                                     st.caption("No names listed.")
                     else:
                         st.error("Invalid inventory format.")
 
     with c_workspace:
-        render_explorer_workspace(selector_type, selected_label, selected_name)
+        # Pass the ACTIVE selection from session state, not the transient widget state
+        render_explorer_workspace(
+            selector_type, 
+            st.session_state.active_explorer_label, 
+            st.session_state.active_explorer_names
+        )
 # ==========================================
 # 0. NON UPDATED PARTS
 # ==========================================
