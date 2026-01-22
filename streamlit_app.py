@@ -328,9 +328,7 @@ def render_explorer_workspace(selector_type, selected_items):
         st.subheader("Extraction")
         st.caption("Select data to add to Evidence Locker")
 
-        # --- RESTORED: Cascading Filters (Fixes UnboundLocalError) ---
-        
-        # 1. Edge Filter
+        # --- Cascading Filters ---
         edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         selected_edge_filter = st.selectbox(
             "Filter by Relationship:",
@@ -339,7 +337,6 @@ def render_explorer_workspace(selector_type, selected_items):
         )
 
         # 2. Target Label Filter
-        # Determine valid target labels based on edge selection
         if selected_edge_filter == "All":
             filtered_df_step1 = df
             target_options = sorted(df['connected_node_label'].unique()) if 'connected_node_label' in df.columns else []
@@ -383,7 +380,11 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 # Construct query description
                 if len(names) > 1:
-                    name_str = "Combined Group"
+                    # FIX: Distinctly list verbs for relationship analysis so user knows what they selected
+                    if selector_type == "Verb":
+                        name_str = f"Verbs: {', '.join(names)}"
+                    else:
+                        name_str = "Combined Group"
                 else:
                     name_str = names[0]
                     
