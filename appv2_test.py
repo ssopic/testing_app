@@ -84,31 +84,54 @@ def fetch_inventory_from_db():
 
 def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
     """
-    Fallback: Generates the DataFrame by running a live Cypher query for MULTIPLE names.
-    Aggregates by Edge Type AND Connected Node Label.
+    Fallback: Generates DataFrame via Cypher.
+    Handles 'Object' (Node-Centric) and 'Verb' (Relationship-Centric) logic.
     """
     driver = get_db_driver()
     if not driver or not names:
         return pd.DataFrame()
 
-    # UPDATED QUERY: Uses 'IN' clause for multiple names
-    query = f"""
-    MATCH (n:`{label}`)-[r]->(m)
-    WHERE n.name IN $names
-    RETURN 
-        type(r) as edge, 
-        labels(n)[0] as node, 
-        coalesce(n.name, 'Unknown') as node_name, 
-        count(m) as count,
-        labels(m)[0] as connected_node_label, 
-        collect(coalesce(r.source_pks, m.doc_id)) as id_list
-    """
-    
     try:
         with driver.session() as session:
-            result = session.run(query, names=names)
+            # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
+            if label == "Verb":
+                # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
+                # We want to see: Edge Type -> Source Label -> Target Label
+                # We use string manipulation to inject types safely because Cypher params can't handle dynamic types easily in this specific aggregation way
+                # But safer is to use WHERE type(r) IN $names
+                
+                query = """
+                MATCH (n)-[r]->(m)
+                WHERE type(r) IN $names
+                RETURN 
+                    type(r) as edge, 
+                    labels(n)[0] as source_node_label, 
+                    labels(m)[0] as connected_node_label, 
+                    count(*) as count,
+                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                LIMIT 2000
+                """
+                result = session.run(query, names=names)
+            
+            # --- CASE B: NODE CENTRIC (OBJECT) ---
+            else:
+                # Standard Logic
+                query = f"""
+                MATCH (n:`{label}`)-[r]->(m)
+                WHERE n.name IN $names
+                RETURN 
+                    type(r) as edge, 
+                    labels(n)[0] as node, 
+                    coalesce(n.name, 'Unknown') as node_name, 
+                    count(m) as count,
+                    labels(m)[0] as connected_node_label, 
+                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                """
+                result = session.run(query, names=names)
+
             data = [r.data() for r in result]
             return pd.DataFrame(data)
+            
     except Exception as e:
         st.error(f"Live Query failed: {e}")
         return pd.DataFrame()
@@ -195,42 +218,107 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
 # ==========================================
 
 @st.fragment
+# ==============================================================================
+# UPDATED BACKEND: VERB SUPPORT
+# ==============================================================================
+
+def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
+    """
+    Fallback: Generates DataFrame via Cypher.
+    Handles 'Object' (Node-Centric) and 'Verb' (Relationship-Centric) logic.
+    """
+    driver = get_db_driver()
+    if not driver or not names:
+        return pd.DataFrame()
+
+    try:
+        with driver.session() as session:
+            # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
+            if label == "Verb":
+                # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
+                query = """
+                MATCH (n)-[r]->(m)
+                WHERE type(r) IN $names
+                RETURN 
+                    type(r) as edge, 
+                    labels(n)[0] as source_node_label, 
+                    labels(m)[0] as connected_node_label, 
+                    count(*) as count,
+                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                LIMIT 2000
+                """
+                result = session.run(query, names=names)
+            
+            # --- CASE B: NODE CENTRIC (OBJECT) ---
+            else:
+                query = f"""
+                MATCH (n:`{label}`)-[r]->(m)
+                WHERE n.name IN $names
+                RETURN 
+                    type(r) as edge, 
+                    labels(n)[0] as node, 
+                    coalesce(n.name, 'Unknown') as node_name, 
+                    count(m) as count,
+                    labels(m)[0] as connected_node_label, 
+                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                """
+                result = session.run(query, names=names)
+
+            data = [r.data() for r in result]
+            return pd.DataFrame(data)
+            
+    except Exception as e:
+        st.error(f"Live Query failed: {e}")
+        return pd.DataFrame()
+    finally:
+        driver.close()
+
+@st.fragment
 def render_explorer_workspace(selector_type, selected_items):
     c_mid, c_right = st.columns([2, 1])
     
     with c_mid:
         if not selected_items:
-            st.info("👈 Select entities from the left and click 'Visualize' to explore.")
+            st.info("👈 Select entities from the left and click 'Visualize'.")
             return
 
-        # Header logic
         names = [item['name'] for item in selected_items]
-        if len(names) == 1:
-            st.subheader(f"{names[0]}")
-        else:
-            st.subheader(f"Combined Analysis ({len(names)} Entities)")
-            st.caption(f"Includes: {', '.join(names[:3])}" + ("..." if len(names) > 3 else ""))
-        
-        # Fetch Data (Passing full item objects now)
+        st.subheader(f"Analysis: {len(names)} Items")
+
+        # Fetch Data
         df = fetch_sunburst_data(selector_type, selected_items)
 
         if df.empty:
-            st.warning(f"No data found for selection.")
+            st.warning("No data found.")
             return
 
-        # Prepare data for Plotly
+        # Prepare Plotly Data
         if 'id_list' in df.columns:
             df['id_list_str'] = df['id_list'].astype(str)
             hover_cols = ['id_list_str']
         else:
             hover_cols = None
 
-        # Sunburst
+        # --- DYNAMIC HIERARCHY BASED ON TYPE ---
+        if selector_type == "Verb":
+            # Hierarchy: Edge Type -> Source Label -> Target Label
+            path = ['edge', 'source_node_label', 'connected_node_label']
+        else:
+            # Hierarchy: Node Name -> Edge Type -> Target Label
+            path = ['node_name', 'edge', 'connected_node_label']
+
+        # Ensure columns exist before plotting
+        valid_path = [col for col in path if col in df.columns]
+        
+        if not valid_path:
+             st.error("Data columns missing for visualization.")
+             return
+
         fig = px.sunburst(
             df, 
-            path=['node_name', 'edge', 'connected_node_label'], 
+            path=valid_path, 
             values='count',
-            color='edge',
+            color='edge' if 'edge' in df.columns else None,
             hover_data=hover_cols
         )
         fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
@@ -241,19 +329,20 @@ def render_explorer_workspace(selector_type, selected_items):
         st.caption("Select data to add to Evidence Locker")
 
         # --- Cascading Filters ---
-        edge_options = sorted(df['edge'].unique())
+        edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         selected_edge_filter = st.selectbox(
             "Filter by Relationship:",
             ["All"] + edge_options,
             key="filter_edge"
         )
 
+        # 2. Target Label Filter
         if selected_edge_filter == "All":
-            target_options = sorted(df['connected_node_label'].unique())
             filtered_df_step1 = df
+            target_options = sorted(df['connected_node_label'].unique()) if 'connected_node_label' in df.columns else []
         else:
             filtered_df_step1 = df[df['edge'] == selected_edge_filter]
-            target_options = sorted(filtered_df_step1['connected_node_label'].unique())
+            target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
 
         selected_target_filter = st.selectbox(
             "Filter by Target Type:",
@@ -261,12 +350,13 @@ def render_explorer_workspace(selector_type, selected_items):
             key="filter_target"
         )
 
+        # 3. Apply Final Filter
         if selected_target_filter == "All":
             final_filtered_df = filtered_df_step1
         else:
             final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'] == selected_target_filter]
 
-        # Flatten IDs
+        # 4. Flatten IDs
         def deep_flatten(container):
             for i in container:
                 if isinstance(i, list):
@@ -290,7 +380,11 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 # Construct query description
                 if len(names) > 1:
-                    name_str = "Combined Group"
+                    # FIX: Distinctly list verbs for relationship analysis so user knows what they selected
+                    if selector_type == "Verb":
+                        name_str = f"Verbs: {', '.join(names)}"
+                    else:
+                        name_str = "Combined Group"
                 else:
                     name_str = names[0]
                     
@@ -328,14 +422,16 @@ def screen_databook():
     
     inventory = fetch_inventory()
     
-    # Initialize session state for persistent selection ("Shopping Cart")
-    # Structure: Set of tuples (label, name)
+    # Initialize persistent selection
     if "databook_selections" not in st.session_state:
         st.session_state.databook_selections = set()
 
-    # Initialize active visualization items
     if "active_explorer_items" not in st.session_state:
         st.session_state.active_explorer_items = []
+
+    # Initialize last selector type to detect tab switches
+    if "last_selector_type" not in st.session_state:
+        st.session_state.last_selector_type = "Object"
 
     if not inventory:
         st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
@@ -346,26 +442,41 @@ def screen_databook():
         with st.container(border=True):
             st.subheader("Selector")
             
+            # 1. Mode Selection
             selector_type = st.radio(
                 "Analysis Mode", 
                 ["Object", "Verb", "Lexical"], 
                 captions=["Node-Centric", "Relationship-Centric", "Text-Mentions"],
                 horizontal=True
             )
+            
+            # --- LOGIC: Auto-Clean on Tab Switch ---
+            if selector_type != st.session_state.last_selector_type:
+                st.session_state.databook_selections = set()
+                st.session_state.active_explorer_items = []
+                st.session_state.last_selector_type = selector_type
+                st.rerun()
+
             st.divider()
 
-            # Global "Visualize" Button at the top for easy access on mobile
-            # Shows count of currently selected items across ALL labels
+            # 2. Controls: Visualize & Clear
             selection_count = len(st.session_state.databook_selections)
-            if st.button(f"Visualize Selected ({selection_count})", type="primary", use_container_width=True):
-                # Convert set of tuples to list of dicts for the renderer
-                st.session_state.active_explorer_items = [
-                    {'label': l, 'name': n} for l, n in st.session_state.databook_selections
-                ]
+            
+            c_vis, c_clear = st.columns([2, 1])
+            with c_vis:
+                if st.button(f"Visualize ({selection_count})", type="primary", use_container_width=True):
+                    st.session_state.active_explorer_items = [
+                        {'label': l, 'name': n} for l, n in st.session_state.databook_selections
+                    ]
+            with c_clear:
+                if st.button("Clear", use_container_width=True):
+                    st.session_state.databook_selections = set()
+                    st.session_state.active_explorer_items = []
+                    st.rerun()
 
             st.divider()
 
-            # Scrollable Container for the lists
+            # 3. Scrollable List Container
             with st.container(height=600, border=False):
                 available_data = inventory.get(selector_type, {})
                 
@@ -373,77 +484,78 @@ def screen_databook():
                     st.caption(f"No inventory for {selector_type}.")
                 else:
                     if isinstance(available_data, dict):
-                        labels = sorted(list(available_data.keys()))
-                        
-                        for label in labels:
-                            # FIX: Check if there is an active search term to keep the expander open
-                            # This prevents the dropdown from collapsing when the user hits 'Enter'
-                            search_key = f"search_{selector_type}_{label}"
-                            # If there is text in the session state for this key, default to open
-                            is_expanded = bool(st.session_state.get(search_key, ""))
+                        # --- OBJECT MODE ---
+                        if selector_type == "Object":
+                            labels = sorted(list(available_data.keys()))
+                            for label in labels:
+                                search_key = f"search_{selector_type}_{label}"
+                                is_expanded = bool(st.session_state.get(search_key, ""))
 
-                            with st.expander(f"{label}", expanded=is_expanded):
-                                # ROBUST DATA CLEANING
-                                raw_vals = available_data[label]
-                                clean_names = []
-                                
-                                if isinstance(raw_vals, dict):
-                                    clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
-                                elif isinstance(raw_vals, list):
-                                    clean_names = [v for v in raw_vals if v and pd.notna(v)]
-                                
-                                # Ensure unique strings and sort
-                                names = sorted(list(set(str(n) for n in clean_names)))
-                                
-                                if names:
-                                    # 1. Search Filter
-                                    search_term = st.text_input(
-                                        f"Search {label}", 
-                                        placeholder="Type to filter...",
-                                        key=search_key
-                                    )
+                                with st.expander(f"{label}", expanded=is_expanded):
+                                    # Clean data
+                                    raw_vals = available_data[label]
+                                    clean_names = []
+                                    if isinstance(raw_vals, dict):
+                                        clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
+                                    elif isinstance(raw_vals, list):
+                                        clean_names = [v for v in raw_vals if v and pd.notna(v)]
+                                    names = sorted(list(set(str(n) for n in clean_names)))
                                     
-                                    # Filter names based on search
-                                    filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
-                                    
-                                    # 2. Render Checkboxes
-                                    if not filtered_names:
-                                        st.caption("No matches found.")
-                                    else:
-                                        # Limit display for performance if list is huge and no search term
-                                        if len(filtered_names) > 50 and not search_term:
-                                            st.info(f"Showing first 50 of {len(filtered_names)}. Use search to find specific items.")
-                                            display_names = filtered_names[:50]
+                                    if names:
+                                        search_term = st.text_input(f"Search {label}", placeholder="Filter...", key=search_key)
+                                        filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
+                                        
+                                        if not filtered_names:
+                                            st.caption("No matches.")
                                         else:
-                                            display_names = filtered_names
+                                            # Truncate large lists
+                                            display_names = filtered_names[:50] if (len(filtered_names) > 50 and not search_term) else filtered_names
+                                            if len(filtered_names) > 50 and not search_term:
+                                                st.info(f"Showing 50 of {len(filtered_names)}.")
 
-                                        for name in display_names:
-                                            # Check state based on global set
-                                            is_selected = (label, name) in st.session_state.databook_selections
-                                            
-                                            # Define the key string explicitly BEFORE the function to avoid scope errors
-                                            chk_key = f"chk_{selector_type}_{label}_{name}"
+                                            for name in display_names:
+                                                is_selected = (label, name) in st.session_state.databook_selections
+                                                chk_key = f"chk_{selector_type}_{label}_{name}"
+                                                
+                                                def update_selection(l=label, n=name, k=chk_key):
+                                                    if st.session_state[k]:
+                                                        st.session_state.databook_selections.add((l, n))
+                                                    else:
+                                                        st.session_state.databook_selections.discard((l, n))
 
-                                            # Pass the PRE-CALCULATED string 'chk_key' into the function default
-                                            def update_selection(l=label, n=name, k=chk_key):
-                                                if st.session_state[k]:
-                                                    st.session_state.databook_selections.add((l, n))
-                                                else:
-                                                    st.session_state.databook_selections.discard((l, n))
+                                                st.checkbox(name, value=is_selected, key=chk_key, on_change=update_selection)
+                                    else:
+                                        st.caption("No names.")
 
-                                            st.checkbox(
-                                                name, 
-                                                value=is_selected, 
-                                                key=chk_key,
-                                                on_change=update_selection
-                                            )
-                                else:
-                                    st.caption("No names listed.")
+                        # --- VERB MODE ---
+                        elif selector_type == "Verb":
+                            rel_types = sorted(list(available_data.keys()))
+                            if rel_types:
+                                search_key = f"search_{selector_type}"
+                                search_term = st.text_input("Search Relationships", placeholder="Filter...", key=search_key)
+                                filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
+                                
+                                for r_type in filtered_rels:
+                                    # Use "Verb" as the label for backend logic
+                                    is_selected = ("Verb", r_type) in st.session_state.databook_selections
+                                    chk_key = f"chk_verb_{r_type}"
+                                    
+                                    def update_verb_selection(t=r_type, k=chk_key):
+                                        if st.session_state[k]:
+                                            st.session_state.databook_selections.add(("Verb", t))
+                                        else:
+                                            st.session_state.databook_selections.discard(("Verb", t))
+                                    
+                                    st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
+                            else:
+                                st.caption("No relationship types found.")
+                        
+                        else:
+                            st.info("Lexical explorer pending.")
                     else:
                         st.error("Invalid inventory format.")
 
     with c_workspace:
-        # Pass the ACTIVE selection from session state
         render_explorer_workspace(
             selector_type, 
             st.session_state.active_explorer_items
