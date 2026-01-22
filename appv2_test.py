@@ -81,18 +81,19 @@ def fetch_inventory_from_db():
         
     return inventory
 
+
 def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.DataFrame:
     """
     Fallback: Generates the DataFrame by running a live Cypher query.
-    Mimics the structure: [edge, node, node_name, id_list, count]
+    Aggregates by Edge Type AND Connected Node Label.
     """
     driver = get_db_driver()
     if not driver:
         return pd.DataFrame()
 
-    # Cypher query to aggregate neighbors
-    # We collect IDs to populate the 'id_list' expected by the UI
-    # We assume 'source_pks' or 'doc_id' exists, otherwise we use internal ID
+    # UPDATED QUERY:
+    # Groups by Source Node, Edge Type, AND Target Node Label.
+    # This creates the hierarchy: Source Name -> Relationship -> Target Type
     query = f"""
     MATCH (n:`{label}`)-[r]->(m)
     WHERE n.name = $name
@@ -100,7 +101,8 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
         type(r) as edge, 
         labels(n)[0] as node, 
         coalesce(n.name, 'Unknown') as node_name, 
-        count(r) as count,
+        count(m) as count,
+        labels(m)[0] as connected_node_label, 
         collect(coalesce(r.source_pks, m.doc_id)) as id_list
     """
     
@@ -114,7 +116,6 @@ def fetch_sunburst_from_db(selector_type: str, label: str, name: str) -> pd.Data
         return pd.DataFrame()
     finally:
         driver.close()
-
 # ==========================================
 # 2. HYBRID FETCHERS (GITHUB -> DB)
 # ==========================================
@@ -190,9 +191,13 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
         else:
             hover_cols = None
 
+        # --- UPDATE: Sunburst Hierarchy ---
+        # Path: Node Name (Center) -> Edge (Ring 1) -> Target Label (Ring 2)
+        # Note: We use 'node_name' as the root. If the DF has multiple 'connected_node_label' values
+        # for the same edge, Plotly splits the ring accordingly.
         fig = px.sunburst(
             df, 
-            path=['edge', 'node', 'node_name'], 
+            path=['node_name', 'edge', 'connected_node_label'], 
             values='count',
             color='edge',
             hover_data=hover_cols
@@ -204,25 +209,39 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
         st.subheader("Extraction")
         st.caption("Select data to add to Evidence Locker")
 
-        # --- UPDATED: Filtering Logic ---
+        # --- UPDATE: Cascading Filters ---
         
-        # 1. Get available edge types from the current dataframe
+        # 1. Edge Filter
         edge_options = sorted(df['edge'].unique())
-        
-        # 2. Filter Dropdown
         selected_edge_filter = st.selectbox(
             "Filter by Relationship:",
             ["All"] + edge_options,
-            help="Narrow down the evidence to specific relationship types."
+            key="filter_edge"
         )
 
-        # 3. Apply Filter to Create a Temporary DataFrame
+        # 2. Target Label Filter (Dynamic based on edge selection)
         if selected_edge_filter == "All":
-            filtered_df = df
+            # Show all possible target labels if no edge is selected
+            target_options = sorted(df['connected_node_label'].unique())
+            filtered_df_step1 = df
         else:
-            filtered_df = df[df['edge'] == selected_edge_filter]
+            # Show only target labels relevant to the selected edge
+            filtered_df_step1 = df[df['edge'] == selected_edge_filter]
+            target_options = sorted(filtered_df_step1['connected_node_label'].unique())
 
-        # 4. Flatten IDs (using filtered_df)
+        selected_target_filter = st.selectbox(
+            "Filter by Target Type:",
+            ["All"] + target_options,
+            key="filter_target"
+        )
+
+        # 3. Apply Final Filter
+        if selected_target_filter == "All":
+            final_filtered_df = filtered_df_step1
+        else:
+            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'] == selected_target_filter]
+
+        # 4. Flatten IDs
         def deep_flatten(container):
             for i in container:
                 if isinstance(i, list):
@@ -231,8 +250,8 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
                     yield str(i)
 
         all_ids = []
-        if 'id_list' in filtered_df.columns:
-            all_ids = list(deep_flatten(filtered_df['id_list']))
+        if 'id_list' in final_filtered_df.columns:
+            all_ids = list(deep_flatten(final_filtered_df['id_list']))
         
         unique_ids = list(set(all_ids))
         
@@ -244,14 +263,20 @@ def render_explorer_workspace(selector_type, selected_label, selected_name):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
-                # Update payload query to reflect the filter choice
+                # Construct descriptive query string
                 query_desc = f"Manual Explorer: {selected_label} -> {selected_name}"
+                filters = []
                 if selected_edge_filter != "All":
-                    query_desc += f" (Only {selected_edge_filter})"
+                    filters.append(f"Edge: {selected_edge_filter}")
+                if selected_target_filter != "All":
+                    filters.append(f"Target: {selected_target_filter}")
+                
+                if filters:
+                    query_desc += f" ({', '.join(filters)})"
 
                 payload = {
                     "query": query_desc,
-                    "answer": f"Visual discovery via {selector_type} found {len(unique_ids)} related documents.",
+                    "answer": f"Visual discovery found {len(unique_ids)} related documents.",
                     "ids": [str(uid) for uid in unique_ids]
                 }
                 
