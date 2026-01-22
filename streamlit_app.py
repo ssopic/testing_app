@@ -114,6 +114,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
         return pd.DataFrame()
     finally:
         driver.close()
+        
 # ==========================================
 # 2. HYBRID FETCHERS (GITHUB -> DB)
 # ==========================================
@@ -135,27 +136,32 @@ def fetch_inventory() -> dict:
         return fetch_inventory_from_db()
 
 @st.cache_data(ttl=3600)
-def fetch_sunburst_data(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
+def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
     """
-    Hybrid Fetcher for Multiple Nodes:
-    1. Iterates through the list of names.
+    Hybrid Fetcher for Multiple Nodes (Mixed Labels):
+    1. Iterates through the list of selected items (label, name).
     2. Tries to fetch GitHub JSON for each.
-    3. If GitHub fails for specific names, it falls back to DB for those specific names (or the whole batch).
+    3. Groups failures by label and falls back to DB in batches.
     4. Returns a concatenated DataFrame.
+    
+    items structure: [{'label': 'PERSON', 'name': 'Jeff'}, ...]
     """
-    if not names:
+    if not items:
         return pd.DataFrame()
 
     base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
     prefix_map = {"Object": "node", "Verb": "relationship", "Lexical": "lexical"}
     file_prefix = prefix_map.get(selector_type, "node")
-    safe_label = label.lower().strip()
 
     dfs = []
-    missing_names = []
+    missing_by_label = {} # Group missing items by label for efficient DB query
 
-    # 1. Try GitHub for each name individually
-    for name in names:
+    # 1. Try GitHub for each item individually
+    for item in items:
+        label = item['label']
+        name = item['name']
+        
+        safe_label = label.lower().strip()
         safe_name = urllib.parse.quote(name.strip())
         filename = f"{file_prefix}_{safe_label}_{safe_name}.json"
         full_url = f"{base_url}{filename}"
@@ -165,16 +171,18 @@ def fetch_sunburst_data(selector_type: str, label: str, names: list[str]) -> pd.
             if not df_part.empty:
                 dfs.append(df_part)
             else:
-                missing_names.append(name)
+                if label not in missing_by_label: missing_by_label[label] = []
+                missing_by_label[label].append(name)
         except:
-            missing_names.append(name)
+            if label not in missing_by_label: missing_by_label[label] = []
+            missing_by_label[label].append(name)
 
-    # 2. Fallback to DB for any missing names
-    if missing_names:
-        # We fetch the missing batch from DB
-        df_db = fetch_sunburst_from_db(selector_type, label, missing_names)
-        if not df_db.empty:
-            dfs.append(df_db)
+    # 2. Fallback to DB for missing items (Batched by Label)
+    for label, names in missing_by_label.items():
+        if names:
+            df_db = fetch_sunburst_from_db(selector_type, label, names)
+            if not df_db.empty:
+                dfs.append(df_db)
 
     # 3. Combine results
     if not dfs:
@@ -187,23 +195,24 @@ def fetch_sunburst_data(selector_type: str, label: str, names: list[str]) -> pd.
 # ==========================================
 
 @st.fragment
-def render_explorer_workspace(selector_type, selected_label, selected_names):
+def render_explorer_workspace(selector_type, selected_items):
     c_mid, c_right = st.columns([2, 1])
     
     with c_mid:
-        if not selected_names:
+        if not selected_items:
             st.info("👈 Select entities from the left and click 'Visualize' to explore.")
             return
 
-        # Header logic for multiple names
-        if len(selected_names) == 1:
-            st.subheader(f"{selected_names[0]}")
+        # Header logic
+        names = [item['name'] for item in selected_items]
+        if len(names) == 1:
+            st.subheader(f"{names[0]}")
         else:
-            st.subheader(f"Combined Analysis ({len(selected_names)} Entities)")
-            st.caption(f"Includes: {', '.join(selected_names[:3])}" + ("..." if len(selected_names) > 3 else ""))
+            st.subheader(f"Combined Analysis ({len(names)} Entities)")
+            st.caption(f"Includes: {', '.join(names[:3])}" + ("..." if len(names) > 3 else ""))
         
-        # Fetch Data (Hybrid Multi)
-        df = fetch_sunburst_data(selector_type, selected_label, selected_names)
+        # Fetch Data (Passing full item objects now)
+        df = fetch_sunburst_data(selector_type, selected_items)
 
         if df.empty:
             st.warning(f"No data found for selection.")
@@ -216,8 +225,7 @@ def render_explorer_workspace(selector_type, selected_label, selected_names):
         else:
             hover_cols = None
 
-        # Sunburst: The 'node_name' column will naturally create separate sectors 
-        # for each source entity at the center if multiple names are selected.
+        # Sunburst
         fig = px.sunburst(
             df, 
             path=['node_name', 'edge', 'connected_node_label'], 
@@ -281,12 +289,12 @@ def render_explorer_workspace(selector_type, selected_label, selected_names):
                 st.error("No documents to add.")
             else:
                 # Construct query description
-                if len(selected_names) > 1:
+                if len(names) > 1:
                     name_str = "Combined Group"
                 else:
-                    name_str = selected_names[0]
+                    name_str = names[0]
                     
-                query_desc = f"Manual Explorer: {selected_label} -> {name_str}"
+                query_desc = f"Manual Explorer: {name_str}"
                 filters = []
                 if selected_edge_filter != "All":
                     filters.append(f"Edge: {selected_edge_filter}")
@@ -320,11 +328,14 @@ def screen_databook():
     
     inventory = fetch_inventory()
     
-    # Initialize session state for active selection if not present
-    if "active_explorer_label" not in st.session_state:
-        st.session_state.active_explorer_label = None
-    if "active_explorer_names" not in st.session_state:
-        st.session_state.active_explorer_names = []
+    # Initialize session state for persistent selection ("Shopping Cart")
+    # Structure: Set of tuples (label, name)
+    if "databook_selections" not in st.session_state:
+        st.session_state.databook_selections = set()
+
+    # Initialize active visualization items
+    if "active_explorer_items" not in st.session_state:
+        st.session_state.active_explorer_items = []
 
     if not inventory:
         st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
@@ -343,7 +354,18 @@ def screen_databook():
             )
             st.divider()
 
-            # Scrollable Container
+            # Global "Visualize" Button at the top for easy access on mobile
+            # Shows count of currently selected items across ALL labels
+            selection_count = len(st.session_state.databook_selections)
+            if st.button(f"Visualize Selected ({selection_count})", type="primary", use_container_width=True):
+                # Convert set of tuples to list of dicts for the renderer
+                st.session_state.active_explorer_items = [
+                    {'label': l, 'name': n} for l, n in st.session_state.databook_selections
+                ]
+
+            st.divider()
+
+            # Scrollable Container for the lists
             with st.container(height=600, border=False):
                 available_data = inventory.get(selector_type, {})
                 
@@ -352,34 +374,61 @@ def screen_databook():
                 else:
                     if isinstance(available_data, dict):
                         labels = sorted(list(available_data.keys()))
+                        
                         for label in labels:
                             with st.expander(f"{label}"):
-                                names = available_data[label]
-                                names = sorted(names) if isinstance(names, list) else []
+                                names = sorted(available_data[label]) if isinstance(available_data[label], list) else []
                                 
                                 if names:
-                                    # MULTI-SELECT WIDGET
-                                    selection = st.multiselect(
-                                        "Select Entities:", 
-                                        names, 
-                                        key=f"sel_{selector_type}_{label}"
+                                    # 1. Search Filter
+                                    search_term = st.text_input(
+                                        f"Search {label}", 
+                                        placeholder="Type to filter...",
+                                        key=f"search_{selector_type}_{label}"
                                     )
                                     
-                                    # VISUALIZE BUTTON (Submits the selection)
-                                    if st.button("Visualize", key=f"btn_{selector_type}_{label}"):
-                                        st.session_state.active_explorer_label = label
-                                        st.session_state.active_explorer_names = selection
+                                    # Filter names based on search
+                                    filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
+                                    
+                                    # 2. Render Checkboxes
+                                    if not filtered_names:
+                                        st.caption("No matches found.")
+                                    else:
+                                        # Use a smaller container or just list them
+                                        # Limit display if too many to prevent UI freeze (optional, but good for mobile)
+                                        if len(filtered_names) > 50 and not search_term:
+                                            st.info(f"Showing first 50 of {len(filtered_names)}. Use search to find specific items.")
+                                            display_names = filtered_names[:50]
+                                        else:
+                                            display_names = filtered_names
+
+                                        for name in display_names:
+                                            # Check state based on global set
+                                            is_selected = (label, name) in st.session_state.databook_selections
+                                            
+                                            # Callback logic to update state immediately
+                                            def update_selection(l=label, n=name, key=f"chk_{selector_type}_{l}_{n}"):
+                                                if st.session_state[key]:
+                                                    st.session_state.databook_selections.add((l, n))
+                                                else:
+                                                    st.session_state.databook_selections.discard((l, n))
+
+                                            st.checkbox(
+                                                name, 
+                                                value=is_selected, 
+                                                key=f"chk_{selector_type}_{label}_{name}",
+                                                on_change=update_selection
+                                            )
                                 else:
                                     st.caption("No names listed.")
                     else:
                         st.error("Invalid inventory format.")
 
     with c_workspace:
-        # Pass the ACTIVE selection from session state, not the transient widget state
+        # Pass the ACTIVE selection from session state
         render_explorer_workspace(
             selector_type, 
-            st.session_state.active_explorer_label, 
-            st.session_state.active_explorer_names
+            st.session_state.active_explorer_items
         )
 # ==========================================
 # 0. NON UPDATED PARTS
