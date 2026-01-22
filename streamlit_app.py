@@ -384,7 +384,7 @@ def render_explorer_workspace(selector_type, selected_items):
                     if selector_type == "Verb":
                         name_str = f"Verbs: {', '.join(names)}"
                     else:
-                        name_str = "Combined Group"
+                        name_str = f"Entities: {', '.join(names)}"
                 else:
                     name_str = names[0]
                     
