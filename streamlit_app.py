@@ -329,6 +329,7 @@ def screen_databook():
     inventory = fetch_inventory()
     
     # Initialize session state for persistent selection ("Shopping Cart")
+    # Structure: Set of tuples (label, name)
     if "databook_selections" not in st.session_state:
         st.session_state.databook_selections = set()
 
@@ -353,16 +354,18 @@ def screen_databook():
             )
             st.divider()
 
-            # Global "Visualize" Button
+            # Global "Visualize" Button at the top for easy access on mobile
+            # Shows count of currently selected items across ALL labels
             selection_count = len(st.session_state.databook_selections)
             if st.button(f"Visualize Selected ({selection_count})", type="primary", use_container_width=True):
+                # Convert set of tuples to list of dicts for the renderer
                 st.session_state.active_explorer_items = [
                     {'label': l, 'name': n} for l, n in st.session_state.databook_selections
                 ]
 
             st.divider()
 
-            # Scrollable Container
+            # Scrollable Container for the lists
             with st.container(height=600, border=False):
                 available_data = inventory.get(selector_type, {})
                 
@@ -373,7 +376,13 @@ def screen_databook():
                         labels = sorted(list(available_data.keys()))
                         
                         for label in labels:
-                            with st.expander(f"{label}"):
+                            # FIX: Check if there is an active search term to keep the expander open
+                            # This prevents the dropdown from collapsing when the user hits 'Enter'
+                            search_key = f"search_{selector_type}_{label}"
+                            # If there is text in the session state for this key, default to open
+                            is_expanded = bool(st.session_state.get(search_key, ""))
+
+                            with st.expander(f"{label}", expanded=is_expanded):
                                 # ROBUST DATA CLEANING
                                 raw_vals = available_data[label]
                                 clean_names = []
@@ -383,6 +392,7 @@ def screen_databook():
                                 elif isinstance(raw_vals, list):
                                     clean_names = [v for v in raw_vals if v and pd.notna(v)]
                                 
+                                # Ensure unique strings and sort
                                 names = sorted(list(set(str(n) for n in clean_names)))
                                 
                                 if names:
@@ -390,15 +400,17 @@ def screen_databook():
                                     search_term = st.text_input(
                                         f"Search {label}", 
                                         placeholder="Type to filter...",
-                                        key=f"search_{selector_type}_{label}"
+                                        key=search_key
                                     )
                                     
+                                    # Filter names based on search
                                     filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
                                     
                                     # 2. Render Checkboxes
                                     if not filtered_names:
                                         st.caption("No matches found.")
                                     else:
+                                        # Limit display for performance if list is huge and no search term
                                         if len(filtered_names) > 50 and not search_term:
                                             st.info(f"Showing first 50 of {len(filtered_names)}. Use search to find specific items.")
                                             display_names = filtered_names[:50]
@@ -409,8 +421,7 @@ def screen_databook():
                                             # Check state based on global set
                                             is_selected = (label, name) in st.session_state.databook_selections
                                             
-                                            # --- THE FIX IS HERE ---
-                                            # Define the key string explicitly BEFORE the function
+                                            # Define the key string explicitly BEFORE the function to avoid scope errors
                                             chk_key = f"chk_{selector_type}_{label}_{name}"
 
                                             # Pass the PRE-CALCULATED string 'chk_key' into the function default
@@ -432,10 +443,12 @@ def screen_databook():
                         st.error("Invalid inventory format.")
 
     with c_workspace:
+        # Pass the ACTIVE selection from session state
         render_explorer_workspace(
             selector_type, 
             st.session_state.active_explorer_items
         )
+        
 # ==========================================
 # 0. NON UPDATED PARTS
 # ==========================================
