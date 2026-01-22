@@ -450,7 +450,7 @@ def screen_databook():
                 horizontal=True
             )
             
-            # --- LOGIC: Auto-Clean on Tab Switch ---
+            # Auto-Clean on Tab Switch
             if selector_type != st.session_state.last_selector_type:
                 st.session_state.databook_selections = set()
                 st.session_state.active_explorer_items = []
@@ -459,107 +459,114 @@ def screen_databook():
 
             st.divider()
 
-            # 2. Controls: Visualize & Clear
-            selection_count = len(st.session_state.databook_selections)
-            
-            c_vis, c_clear = st.columns([2, 1])
-            with c_vis:
-                if st.button(f"Visualize ({selection_count})", type="primary", use_container_width=True):
-                    st.session_state.active_explorer_items = [
-                        {'label': l, 'name': n} for l, n in st.session_state.databook_selections
-                    ]
-            with c_clear:
-                if st.button("Clear", use_container_width=True):
-                    st.session_state.databook_selections = set()
-                    st.session_state.active_explorer_items = []
-                    st.rerun()
+            # 2. Controls: Visualize & Clear (Only show if NOT Lexical)
+            if selector_type != "Lexical":
+                selection_count = len(st.session_state.databook_selections)
+                
+                c_vis, c_clear = st.columns([2, 1])
+                with c_vis:
+                    if st.button(f"Visualize ({selection_count})", type="primary", use_container_width=True):
+                        st.session_state.active_explorer_items = [
+                            {'label': l, 'name': n} for l, n in st.session_state.databook_selections
+                        ]
+                with c_clear:
+                    if st.button("Clear", use_container_width=True):
+                        st.session_state.databook_selections = set()
+                        st.session_state.active_explorer_items = []
+                        st.rerun()
 
-            st.divider()
+                st.divider()
 
             # 3. Scrollable List Container
             with st.container(height=600, border=False):
-                available_data = inventory.get(selector_type, {})
-                
-                if not available_data:
-                    st.caption(f"No inventory for {selector_type}.")
+                # --- LOGIC FOR LEXICAL (Placeholder) ---
+                if selector_type == "Lexical":
+                     st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
+                     # No further logic executes for this branch
+
+                # --- LOGIC FOR OBJECT & VERB ---
                 else:
-                    if isinstance(available_data, dict):
-                        # --- OBJECT MODE ---
-                        if selector_type == "Object":
-                            labels = sorted(list(available_data.keys()))
-                            for label in labels:
-                                search_key = f"search_{selector_type}_{label}"
-                                is_expanded = bool(st.session_state.get(search_key, ""))
-
-                                with st.expander(f"{label}", expanded=is_expanded):
-                                    # Clean data
-                                    raw_vals = available_data[label]
-                                    clean_names = []
-                                    if isinstance(raw_vals, dict):
-                                        clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
-                                    elif isinstance(raw_vals, list):
-                                        clean_names = [v for v in raw_vals if v and pd.notna(v)]
-                                    names = sorted(list(set(str(n) for n in clean_names)))
-                                    
-                                    if names:
-                                        search_term = st.text_input(f"Search {label}", placeholder="Filter...", key=search_key)
-                                        filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
-                                        
-                                        if not filtered_names:
-                                            st.caption("No matches.")
-                                        else:
-                                            # Truncate large lists
-                                            display_names = filtered_names[:50] if (len(filtered_names) > 50 and not search_term) else filtered_names
-                                            if len(filtered_names) > 50 and not search_term:
-                                                st.info(f"Showing 50 of {len(filtered_names)}.")
-
-                                            for name in display_names:
-                                                is_selected = (label, name) in st.session_state.databook_selections
-                                                chk_key = f"chk_{selector_type}_{label}_{name}"
-                                                
-                                                def update_selection(l=label, n=name, k=chk_key):
-                                                    if st.session_state[k]:
-                                                        st.session_state.databook_selections.add((l, n))
-                                                    else:
-                                                        st.session_state.databook_selections.discard((l, n))
-
-                                                st.checkbox(name, value=is_selected, key=chk_key, on_change=update_selection)
-                                    else:
-                                        st.caption("No names.")
-
-                        # --- VERB MODE ---
-                        elif selector_type == "Verb":
-                            rel_types = sorted(list(available_data.keys()))
-                            if rel_types:
-                                search_key = f"search_{selector_type}"
-                                search_term = st.text_input("Search Relationships", placeholder="Filter...", key=search_key)
-                                filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
-                                
-                                for r_type in filtered_rels:
-                                    # Use "Verb" as the label for backend logic
-                                    is_selected = ("Verb", r_type) in st.session_state.databook_selections
-                                    chk_key = f"chk_verb_{r_type}"
-                                    
-                                    def update_verb_selection(t=r_type, k=chk_key):
-                                        if st.session_state[k]:
-                                            st.session_state.databook_selections.add(("Verb", t))
-                                        else:
-                                            st.session_state.databook_selections.discard(("Verb", t))
-                                    
-                                    st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
-                            else:
-                                st.caption("No relationship types found.")
-                        
-                        else:
-                            st.info("Lexical explorer pending.")
+                    available_data = inventory.get(selector_type, {})
+                    
+                    if not available_data:
+                        st.caption(f"No inventory for {selector_type}.")
                     else:
-                        st.error("Invalid inventory format.")
+                        if isinstance(available_data, dict):
+                            # --- OBJECT MODE ---
+                            if selector_type == "Object":
+                                labels = sorted(list(available_data.keys()))
+                                for label in labels:
+                                    search_key = f"search_{selector_type}_{label}"
+                                    is_expanded = bool(st.session_state.get(search_key, ""))
+
+                                    with st.expander(f"{label}", expanded=is_expanded):
+                                        # Clean data
+                                        raw_vals = available_data[label]
+                                        clean_names = []
+                                        if isinstance(raw_vals, dict):
+                                            clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
+                                        elif isinstance(raw_vals, list):
+                                            clean_names = [v for v in raw_vals if v and pd.notna(v)]
+                                        names = sorted(list(set(str(n) for n in clean_names)))
+                                        
+                                        if names:
+                                            search_term = st.text_input(f"Search {label}", placeholder="Filter...", key=search_key)
+                                            filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
+                                            
+                                            if not filtered_names:
+                                                st.caption("No matches.")
+                                            else:
+                                                # Truncate large lists
+                                                display_names = filtered_names[:50] if (len(filtered_names) > 50 and not search_term) else filtered_names
+                                                if len(filtered_names) > 50 and not search_term:
+                                                    st.info(f"Showing 50 of {len(filtered_names)}.")
+
+                                                for name in display_names:
+                                                    is_selected = (label, name) in st.session_state.databook_selections
+                                                    chk_key = f"chk_{selector_type}_{label}_{name}"
+                                                    
+                                                    def update_selection(l=label, n=name, k=chk_key):
+                                                        if st.session_state[k]:
+                                                            st.session_state.databook_selections.add((l, n))
+                                                        else:
+                                                            st.session_state.databook_selections.discard((l, n))
+
+                                                    st.checkbox(name, value=is_selected, key=chk_key, on_change=update_selection)
+                                        else:
+                                            st.caption("No names.")
+
+                            # --- VERB MODE ---
+                            elif selector_type == "Verb":
+                                rel_types = sorted(list(available_data.keys()))
+                                if rel_types:
+                                    search_key = f"search_{selector_type}"
+                                    search_term = st.text_input("Search Relationships", placeholder="Filter...", key=search_key)
+                                    filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
+                                    
+                                    for r_type in filtered_rels:
+                                        # Use "Verb" as the label for backend logic
+                                        is_selected = ("Verb", r_type) in st.session_state.databook_selections
+                                        chk_key = f"chk_verb_{r_type}"
+                                        
+                                        def update_verb_selection(t=r_type, k=chk_key):
+                                            if st.session_state[k]:
+                                                st.session_state.databook_selections.add(("Verb", t))
+                                            else:
+                                                st.session_state.databook_selections.discard(("Verb", t))
+                                        
+                                        st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
+                                else:
+                                    st.caption("No relationship types found.")
+                        else:
+                            st.error("Invalid inventory format.")
 
     with c_workspace:
-        render_explorer_workspace(
-            selector_type, 
-            st.session_state.active_explorer_items
-        )
+        # Don't try to render workspace for Lexical placeholder
+        if selector_type != "Lexical":
+            render_explorer_workspace(
+                selector_type, 
+                st.session_state.active_explorer_items
+            )
         
 # ==========================================
 # 0. NON UPDATED PARTS
