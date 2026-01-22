@@ -329,7 +329,6 @@ def screen_databook():
     inventory = fetch_inventory()
     
     # Initialize session state for persistent selection ("Shopping Cart")
-    # Structure: Set of tuples (label, name)
     if "databook_selections" not in st.session_state:
         st.session_state.databook_selections = set()
 
@@ -354,18 +353,16 @@ def screen_databook():
             )
             st.divider()
 
-            # Global "Visualize" Button at the top for easy access on mobile
-            # Shows count of currently selected items across ALL labels
+            # Global "Visualize" Button
             selection_count = len(st.session_state.databook_selections)
             if st.button(f"Visualize Selected ({selection_count})", type="primary", use_container_width=True):
-                # Convert set of tuples to list of dicts for the renderer
                 st.session_state.active_explorer_items = [
                     {'label': l, 'name': n} for l, n in st.session_state.databook_selections
                 ]
 
             st.divider()
 
-            # Scrollable Container for the lists
+            # Scrollable Container
             with st.container(height=600, border=False):
                 available_data = inventory.get(selector_type, {})
                 
@@ -377,19 +374,15 @@ def screen_databook():
                         
                         for label in labels:
                             with st.expander(f"{label}"):
-                                # ROBUST DATA CLEANING:
-                                # Handle Pandas artifacts (NaNs in unequal lists) and Dict/List variations
+                                # ROBUST DATA CLEANING
                                 raw_vals = available_data[label]
                                 clean_names = []
                                 
                                 if isinstance(raw_vals, dict):
-                                    # If pandas parsed as dict of index->value
                                     clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
                                 elif isinstance(raw_vals, list):
-                                    # If parsed as list
                                     clean_names = [v for v in raw_vals if v and pd.notna(v)]
                                 
-                                # Ensure unique strings and sort
                                 names = sorted(list(set(str(n) for n in clean_names)))
                                 
                                 if names:
@@ -400,15 +393,12 @@ def screen_databook():
                                         key=f"search_{selector_type}_{label}"
                                     )
                                     
-                                    # Filter names based on search
                                     filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
                                     
                                     # 2. Render Checkboxes
                                     if not filtered_names:
                                         st.caption("No matches found.")
                                     else:
-                                        # Use a smaller container or just list them
-                                        # Limit display if too many to prevent UI freeze (optional, but good for mobile)
                                         if len(filtered_names) > 50 and not search_term:
                                             st.info(f"Showing first 50 of {len(filtered_names)}. Use search to find specific items.")
                                             display_names = filtered_names[:50]
@@ -419,9 +409,13 @@ def screen_databook():
                                             # Check state based on global set
                                             is_selected = (label, name) in st.session_state.databook_selections
                                             
-                                            # Callback logic to update state immediately
-                                            def update_selection(l=label, n=name, key=f"chk_{selector_type}_{l}_{n}"):
-                                                if st.session_state[key]:
+                                            # --- THE FIX IS HERE ---
+                                            # Define the key string explicitly BEFORE the function
+                                            chk_key = f"chk_{selector_type}_{label}_{name}"
+
+                                            # Pass the PRE-CALCULATED string 'chk_key' into the function default
+                                            def update_selection(l=label, n=name, k=chk_key):
+                                                if st.session_state[k]:
                                                     st.session_state.databook_selections.add((l, n))
                                                 else:
                                                     st.session_state.databook_selections.discard((l, n))
@@ -429,7 +423,7 @@ def screen_databook():
                                             st.checkbox(
                                                 name, 
                                                 value=is_selected, 
-                                                key=f"chk_{selector_type}_{label}_{name}",
+                                                key=chk_key,
                                                 on_change=update_selection
                                             )
                                 else:
@@ -438,7 +432,6 @@ def screen_databook():
                         st.error("Invalid inventory format.")
 
     with c_workspace:
-        # Pass the ACTIVE selection from session state
         render_explorer_workspace(
             selector_type, 
             st.session_state.active_explorer_items
