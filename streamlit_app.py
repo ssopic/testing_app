@@ -377,7 +377,20 @@ def screen_databook():
                         
                         for label in labels:
                             with st.expander(f"{label}"):
-                                names = sorted(available_data[label]) if isinstance(available_data[label], list) else []
+                                # ROBUST DATA CLEANING:
+                                # Handle Pandas artifacts (NaNs in unequal lists) and Dict/List variations
+                                raw_vals = available_data[label]
+                                clean_names = []
+                                
+                                if isinstance(raw_vals, dict):
+                                    # If pandas parsed as dict of index->value
+                                    clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
+                                elif isinstance(raw_vals, list):
+                                    # If parsed as list
+                                    clean_names = [v for v in raw_vals if v and pd.notna(v)]
+                                
+                                # Ensure unique strings and sort
+                                names = sorted(list(set(str(n) for n in clean_names)))
                                 
                                 if names:
                                     # 1. Search Filter
