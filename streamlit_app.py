@@ -836,34 +836,58 @@ class GraphRAGPipeline:
     def _check_query_safety(self, cypher: str) -> bool:
         return not bool(SAFETY_REGEX.search(cypher))
 
+    @traceable 
     def _run_agent(self, agent_name: str, output_model: BaseModel, context: Dict) -> Any:
+        
+        # ---  Dynamic Renaming Logic ---
+        rt = get_current_run_tree()
+        if rt:
+            rt.name = agent_name
+        # ---------------------------------
+
         sys_prompt = SYSTEM_PROMPTS.get(agent_name, "")
+        
         formatted_context = {}
         for k, v in context.items():
-            if isinstance(v, BaseModel): formatted_context[k] = v.model_dump_json(indent=2)
-            elif isinstance(v, (dict, list)): formatted_context[k] = json.dumps(v, indent=2)
-            else: formatted_context[k] = str(v)
+            if isinstance(v, BaseModel): 
+                formatted_context[k] = v.model_dump_json(indent=2)
+            elif isinstance(v, (dict, list)): 
+                formatted_context[k] = json.dumps(v, indent=2)
+            else: 
+                formatted_context[k] = str(v)
 
         msgs = [("system", sys_prompt)]
         
         # Prompt Mapping
-        if agent_name == "Intent Planner": msgs.append(("human", "QUERY: {user_query}"))
-        elif agent_name == "Schema Selector": msgs.append(("human", "BLUEPRINT: {blueprint}\nFULL_SCHEMA: {full_schema}"))
-        elif agent_name == "Grounding Agent": msgs.append(("human", "BLUEPRINT: {blueprint}\nSCHEMA: {schema}\nQUERY: {user_query}"))
-        elif agent_name == "Cypher Generator": msgs.append(("human", "GROUNDED_COMPONENT: {blueprint}"))
-        elif agent_name == "Query Debugger": msgs.append(("human", "ERROR: {error}\nQUERY: {failed_query}\nBLUEPRINT: {blueprint}\nWARNINGS: {warnings}"))
-        elif agent_name == "Synthesizer": msgs.append(("human", "QUERY: {user_query}\nCYPHER: {final_cypher}\nRESULTS: {db_result}"))
+        if agent_name == "Intent Planner": 
+            msgs.append(("human", "QUERY: {user_query}"))
+        elif agent_name == "Schema Selector": 
+            msgs.append(("human", "BLUEPRINT: {blueprint}\nFULL_SCHEMA: {full_schema}"))
+        elif agent_name == "Grounding Agent": 
+            msgs.append(("human", "BLUEPRINT: {blueprint}\nSCHEMA: {schema}\nQUERY: {user_query}"))
+        elif agent_name == "Cypher Generator": 
+            msgs.append(("human", "GROUNDED_COMPONENT: {blueprint}"))
+        elif agent_name == "Query Debugger": 
+            msgs.append(("human", "ERROR: {error}\nQUERY: {failed_query}\nBLUEPRINT: {blueprint}\nWARNINGS: {warnings}"))
+        elif agent_name == "Synthesizer": 
+            msgs.append(("human", "QUERY: {user_query}\nCYPHER: {final_cypher}\nRESULTS: {db_result}"))
         
         prompt = ChatPromptTemplate.from_messages(msgs)
         return (prompt | self.llm.with_structured_output(output_model)).invoke(formatted_context)
-
-    def run(self, user_query: str) -> Dict[str, Any]:
+        
+    @traceable(name="GraphRAG Main Pipeline")
+    def run(self, user_query: str, session_id: str = "default") -> Dict[str, Any]:
+        rt = get_current_run_tree()
+        if rt:
+            rt.add_metadata({"session_id": session_id})
         pipeline_object = {"user_query": user_query, "status": "INIT", "execution_history": [], "proof_ids": []}
         
         try:
             # 1. Intent
             pipeline_object["status"] = "PLANNING"
             blueprint = self._run_agent("Intent Planner", StructuredBlueprint, {"user_query": user_query})
+
+            pipeline_object["intent_data"] = blueprint.dict() # Save for debugging
             
             # 2. Schema
             full_schema = self._get_full_schema()
@@ -871,6 +895,7 @@ class GraphRAGPipeline:
             
             # 3. Grounding
             grounding = self._run_agent("Grounding Agent", GroundingOutput, {"blueprint": blueprint, "schema": pruned_schema.model_dump(), "user_query": user_query})
+            pipeline_object["grounding_data"] = grounding.model_dump() # Save for debugging
             
             grounded_comp = GroundedComponent(
                 source_node_label=grounding.source_node_label,
@@ -1123,7 +1148,7 @@ def screen_extraction():
             
             with st.chat_message("assistant"):
                 with st.spinner("Analyzing public dataset..."):
-                    result = pipeline.run(user_msg)
+                    result = pipeline.run(user_msg, session_id=st.session_state["app_session_id"])
                     
                     if result.get("status") == "ERROR":
                         err_msg = result.get("error", "Unknown Error")
@@ -1135,8 +1160,13 @@ def screen_extraction():
                         st.write(ans)
                         
                         if result.get("cypher_query"):
-                            with st.expander("Generated Cypher"):
-                                st.code(result["cypher_query"], language="cypher")
+                            with st.expander("🕵️ Analysis Details (Cypher & Trace)"):
+                                if result.get("cypher_query"):
+                                    st.caption("Generated Cypher:")
+                                    st.code(result["cypher_query"], language="cypher")
+                                
+                                st.caption("Full Pipeline Trace Data:")
+                                st.json(result) # This shows the Intent/Grounding data we saved!
 
                         st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
                         
