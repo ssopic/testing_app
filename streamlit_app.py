@@ -1009,27 +1009,52 @@ def attempt_connection(uri, username, password, api_key):
 def show_settings_dialog():
     """
     Pop-up modal for manually configuring credentials.
+    Masks secrets so they are not exposed in the UI source.
     """
     st.write("Configure your database and API connections.")
     
     # Load current values from session or environment defaults
     current_creds = st.session_state.app_state.get("neo4j_creds", {})
     
-    default_mistral = st.session_state.app_state.get("mistral_key") or get_config("MISTRAL_API_KEY")
-    default_uri = current_creds.get("uri") or get_config("NEO4J_URI")
-    default_user = current_creds.get("user") or get_config("NEO4J_USER", "neo4j")
-    
-    # Do not pre-fill password from env for security, only if already in session
-    default_pass = current_creds.get("pass") or get_config("NEO4J_PASSWORD")
+    # Get existing values (from session or secrets) to determine STATUS (not value)
+    existing_mistral = st.session_state.app_state.get("mistral_key") or get_config("MISTRAL_API_KEY")
+    existing_uri = current_creds.get("uri") or get_config("NEO4J_URI")
+    existing_user = current_creds.get("user") or get_config("NEO4J_USER", "neo4j")
+    existing_pass = current_creds.get("pass") or get_config("NEO4J_PASSWORD")
 
-    m_key = st.text_input("Mistral API Key", value=default_mistral, type="password")
-    n_uri = st.text_input("Neo4j URI", value=default_uri)
-    n_user = st.text_input("Neo4j User", value=default_user)
-    n_pass = st.text_input("Neo4j Password", value=default_pass, type="password")
+    # URI and User are safe to show in plain text
+    n_uri = st.text_input("Neo4j URI", value=existing_uri or "")
+    n_user = st.text_input("Neo4j User", value=existing_user or "neo4j")
+    
+    # --- SECRETS MASKING LOGIC ---
+    # We do NOT put the actual key in 'value'. We only show a placeholder if it exists.
+    
+    mistral_placeholder = "******** (Stored)" if existing_mistral else "Enter Mistral API Key"
+    pass_placeholder = "******** (Stored)" if existing_pass else "Enter Neo4j Password"
+    
+    st.caption("Leave passwords blank to keep the currently stored values.")
+    
+    # Inputs start empty
+    m_key_input = st.text_input("Mistral API Key", value="", type="password", placeholder=mistral_placeholder)
+    n_pass_input = st.text_input("Neo4j Password", value="", type="password", placeholder=pass_placeholder)
     
     if st.button("Save & Reconnect", type="primary"):
+        # LOGIC: Use new input if provided, otherwise fall back to existing value
+        
+        # 1. Resolve Mistral Key
+        if m_key_input:
+            final_mistral = m_key_input
+        else:
+            final_mistral = existing_mistral # Use the one we already have
+            
+        # 2. Resolve Password
+        if n_pass_input:
+            final_pass = n_pass_input
+        else:
+            final_pass = existing_pass # Use the one we already have
+
         with st.spinner("Testing connection..."):
-            success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+            success, msg = attempt_connection(n_uri, n_user, final_pass, final_mistral)
             if success:
                 st.success(msg)
                 st.rerun()
