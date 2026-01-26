@@ -1022,39 +1022,33 @@ def show_settings_dialog():
     existing_user = current_creds.get("user") or get_config("NEO4J_USER", "neo4j")
     existing_pass = current_creds.get("pass") or get_config("NEO4J_PASSWORD")
 
-    # URI and User are safe to show in plain text
-    n_uri = st.text_input("Neo4j URI", value=existing_uri or "")
-    n_user = st.text_input("Neo4j User", value=existing_user or "neo4j")
-    
     # --- SECRETS MASKING LOGIC ---
     # We do NOT put the actual key in 'value'. We only show a placeholder if it exists.
     
     mistral_placeholder = "******** (Stored)" if existing_mistral else "Enter Mistral API Key"
+    uri_placeholder = "******** (Stored)" if existing_uri else "Enter Neo4j URI"
+    user_placeholder = "******** (Stored)" if existing_user else "Enter Neo4j User"
     pass_placeholder = "******** (Stored)" if existing_pass else "Enter Neo4j Password"
     
-    st.caption("Leave passwords blank to keep the currently stored values.")
+    st.caption("Leave fields blank to keep the currently stored values.")
     
-    # Inputs start empty
+    # Inputs start empty to protect secrets
     m_key_input = st.text_input("Mistral API Key", value="", type="password", placeholder=mistral_placeholder)
+    n_uri_input = st.text_input("Neo4j URI", value="", placeholder=uri_placeholder)
+    n_user_input = st.text_input("Neo4j User", value="", placeholder=user_placeholder)
     n_pass_input = st.text_input("Neo4j Password", value="", type="password", placeholder=pass_placeholder)
     
     if st.button("Save & Reconnect", type="primary"):
         # LOGIC: Use new input if provided, otherwise fall back to existing value
         
-        # 1. Resolve Mistral Key
-        if m_key_input:
-            final_mistral = m_key_input
-        else:
-            final_mistral = existing_mistral # Use the one we already have
-            
-        # 2. Resolve Password
-        if n_pass_input:
-            final_pass = n_pass_input
-        else:
-            final_pass = existing_pass # Use the one we already have
+        # Resolve inputs (ternary operator handles 'None' or empty string)
+        final_mistral = m_key_input if m_key_input else existing_mistral
+        final_uri = n_uri_input if n_uri_input else existing_uri
+        final_user = n_user_input if n_user_input else existing_user
+        final_pass = n_pass_input if n_pass_input else existing_pass
 
         with st.spinner("Testing connection..."):
-            success, msg = attempt_connection(n_uri, n_user, final_pass, final_mistral)
+            success, msg = attempt_connection(final_uri, final_user, final_pass, final_mistral)
             if success:
                 st.success(msg)
                 st.rerun()
