@@ -966,25 +966,97 @@ if "app_state" not in st.session_state:
 
 # --- SCREENS ---
 
-def screen_connection():
-    st.title("🔗 Connection Gatekeeper")
-    with st.container(border=True):
-        m_key = st.text_input("Mistral API Key", type="password", key="m_key")
-        n_uri = st.text_input("Neo4j URI", key="n_uri")
-        n_user = st.text_input("Neo4j User", value="neo4j", key="n_user")
-        n_pass = st.text_input("Neo4j Password", type="password", key="n_pass")
+# ==========================================
+# AUTHENTICATION & SETTINGS LOGIC
+# ==========================================
+
+def get_config(key, default=""):
+    """Helper to get credentials from Secrets (Cloud) or Env (Local)."""
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, default)
+
+def attempt_connection(uri, username, password, api_key):
+    """
+    Attempts to connect to Neo4j and validate the Mistral Key.
+    Returns (Success: bool, Message: str)
+    """
+    try:
+        # Validate Neo4j connection using your existing function
+        stats = fetch_schema_statistics(uri, (username, password))
         
-        if st.button("🚀 Connect"):
-            with st.spinner("Validating..."):
-                stats = fetch_schema_statistics(n_uri, (n_user, n_pass))
-                if stats["status"] == "SUCCESS":
-                    st.session_state.app_state.update({
-                        "connected": True, "mistral_key": m_key,
-                        "neo4j_creds": {"uri": n_uri, "user": n_user, "pass": n_pass, "auth": (n_user, n_pass)},
-                        "schema_stats": stats
-                    })
-                    st.rerun()
-                else: st.error(stats.get("error"))
+        if stats["status"] == "SUCCESS":
+            # Update Session State on success
+            st.session_state.app_state.update({
+                "connected": True,
+                "mistral_key": api_key,
+                "neo4j_creds": {
+                    "uri": uri, 
+                    "user": username, 
+                    "pass": password, 
+                    "auth": (username, password)
+                },
+                "schema_stats": stats
+            })
+            return True, "✅ Successfully connected to Neo4j & Mistral!"
+        else:
+            return False, f"Neo4j Error: {stats.get('error')}"
+
+    except Exception as e:
+        return False, f"Connection Failed: {str(e)}"
+
+@st.dialog("⚙️ Settings")
+def show_settings_dialog():
+    """
+    Pop-up modal for manually configuring credentials.
+    """
+    st.write("Configure your database and API connections.")
+    
+    # Load current values from session or environment defaults
+    current_creds = st.session_state.app_state.get("neo4j_creds", {})
+    
+    default_mistral = st.session_state.app_state.get("mistral_key") or get_config("MISTRAL_API_KEY")
+    default_uri = current_creds.get("uri") or get_config("NEO4J_URI")
+    default_user = current_creds.get("user") or get_config("NEO4J_USER", "neo4j")
+    
+    # Do not pre-fill password from env for security, only if already in session
+    default_pass = current_creds.get("pass") or get_config("NEO4J_PASSWORD")
+
+    m_key = st.text_input("Mistral API Key", value=default_mistral, type="password")
+    n_uri = st.text_input("Neo4j URI", value=default_uri)
+    n_user = st.text_input("Neo4j User", value=default_user)
+    n_pass = st.text_input("Neo4j Password", value=default_pass, type="password")
+    
+    if st.button("Save & Reconnect", type="primary"):
+        with st.spinner("Testing connection..."):
+            success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+def init_app():
+    """
+    Runs once on app startup to try auto-login using Secrets/Env Vars.
+    """
+    if st.session_state.get("has_tried_login", False):
+        return
+
+    # Get defaults from environment
+    m_key = get_config("MISTRAL_API_KEY")
+    n_uri = get_config("NEO4J_URI")
+    n_user = get_config("NEO4J_USER", "neo4j")
+    n_pass = get_config("NEO4J_PASSWORD")
+
+    # Only attempt if we actually have credentials
+    if n_uri and n_pass and m_key:
+        success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+        if not success:
+            # Pop-up toast notification of failure (non-intrusive)
+            st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
+    
+    st.session_state.has_tried_login = True
 
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
@@ -1169,20 +1241,44 @@ def screen_analysis():
 
 # --- MAIN NAVIGATION ---
 
-if not st.session_state.app_state["connected"]:
-    screen_connection()
-else:
-    nav = st.sidebar.radio("Navigation", ["Databook", "Search", "Locker", "Analysis"])
+# 1. Try to initialize (Auto-connect on startup)
+init_app()
+
+# 2. Sidebar Navigation
+with st.sidebar:
+    st.header("Graph Analyst")
     
-    # UPDATED NAVIGATION: Call the local function directly
+    # Navigation Options
+    nav_options = ["Databook", "Search", "Locker", "Analysis"]
+    nav = st.radio("Navigation", nav_options)
+    
+    st.divider()
+    
+    # NEW: Settings Button (Opens the pop-up dialog)
+    if st.button("⚙️ Settings"):
+        show_settings_dialog()
+    
+    # NEW: Connection Status & Logout
+    if st.session_state.app_state["connected"]:
+        st.caption("🟢 Connected")
+        if st.button("Logout"):
+            st.session_state.app_state["connected"] = False
+            st.session_state.has_tried_login = False # Reset so it doesn't auto-login immediately
+            st.rerun()
+    else:
+        st.caption("🔴 Disconnected")
+
+# 3. Main Content Router
+if not st.session_state.app_state["connected"]:
+    # Landing message instead of the old 'screen_connection()'
+    st.info("👋 Welcome! The app is disconnected.\n\nIf you set up your Secrets correctly, this should not appear.\n\nOtherwise, click **⚙️ Settings** in the sidebar to connect manually.")
+else:
+    # Router to your screens
     if nav == "Databook": 
         screen_databook()
-            
-    elif nav == "Search": screen_extraction()
-    elif nav == "Locker": screen_locker()
-    elif nav == "Analysis": screen_analysis()
-    
-    st.sidebar.divider()
-    if st.sidebar.button("Logout"):
-        st.session_state.app_state["connected"] = False
-        st.rerun()
+    elif nav == "Search": 
+        screen_extraction()
+    elif nav == "Locker": 
+        screen_locker()
+    elif nav == "Analysis": 
+        screen_analysis()
