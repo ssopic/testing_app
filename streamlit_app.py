@@ -21,7 +21,49 @@ import plotly.express as px
 import urllib.parse
 
 
+# --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
+# This block must sit here, at the global level, right after imports.
+# It ensures the library picks up the config before the @traceable decorators run.
 
+if "LANGSMITH_API_KEY" in st.secrets:
+    # 1. Set the API Key
+    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+    
+    # 2. Set the Project Name
+    os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+
+    # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
+    # The error logs showed the app was defaulting to US. This forces EU.
+    os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
+    os.environ["LANGSMITH_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
+
+# -------------------------------------------------------------
+
+def init_app():
+    """
+    Runs once on app startup. 
+    Now simplified because LangSmith setup is handled globally above.
+    """
+    # Initialize Session ID
+    if "app_session_id" not in st.session_state:
+        st.session_state["app_session_id"] = str(uuid.uuid4())
+
+    if st.session_state.get("has_tried_login", False):
+        return
+
+    # Existing credential logic...
+    m_key = get_config("MISTRAL_API_KEY")
+    n_uri = get_config("NEO4J_URI")
+    n_user = get_config("NEO4J_USER", "neo4j")
+    n_pass = get_config("NEO4J_PASSWORD")
+
+    if n_uri and n_pass and m_key:
+        success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+        if not success:
+            st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
+    
+    st.session_state.has_tried_login = True
 # ==========================================
 ### NEW DATABOOK ###
 # ==========================================
@@ -1083,38 +1125,39 @@ def show_settings_dialog():
             else:
                 st.error(msg)
 
-def init_app():
-    """
-    Runs once on app startup to try auto-login using Secrets/Env Vars.
-    """
-    if st.session_state.get("has_tried_login", False):
-        return
+#old version. probabbly going to delete
+# def init_app():
+#     """
+#     Runs once on app startup to try auto-login using Secrets/Env Vars.
+#     """
+#     if st.session_state.get("has_tried_login", False):
+#         return
 
-    # 1. NEW: Setup LangSmith 
-    # This MUST happen here so the library finds the key when the pipeline runs later
-    ls_key = get_config("LANGCHAIN_API_KEY") 
-    if ls_key:
-        os.environ["LANGCHAIN_API_KEY"] = ls_key
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
-        os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
-    if "app_session_id" not in st.session_state:
-        st.session_state["app_session_id"] = str(uuid.uuid4())
+#     # 1. NEW: Setup LangSmith 
+#     # This MUST happen here so the library finds the key when the pipeline runs later
+#     ls_key = get_config("LANGCHAIN_API_KEY") 
+#     if ls_key:
+#         os.environ["LANGCHAIN_API_KEY"] = ls_key
+#         os.environ["LANGCHAIN_TRACING_V2"] = "true"
+#         os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+#         os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
+#     if "app_session_id" not in st.session_state:
+#         st.session_state["app_session_id"] = str(uuid.uuid4())
 
-    # 2. Get DATABASE and mistral keys
-    m_key = get_config("MISTRAL_API_KEY")
-    n_uri = get_config("NEO4J_URI")
-    n_user = get_config("NEO4J_USER", "neo4j")
-    n_pass = get_config("NEO4J_PASSWORD")
+#     # 2. Get DATABASE and mistral keys
+#     m_key = get_config("MISTRAL_API_KEY")
+#     n_uri = get_config("NEO4J_URI")
+#     n_user = get_config("NEO4J_USER", "neo4j")
+#     n_pass = get_config("NEO4J_PASSWORD")
 
-    # Only attempt if we actually have credentials
-    if n_uri and n_pass and m_key:
-        success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
-        if not success:
-            # Pop-up toast notification of failure (non-intrusive)
-            st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
+#     # Only attempt if we actually have credentials
+#     if n_uri and n_pass and m_key:
+#         success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+#         if not success:
+#             # Pop-up toast notification of failure (non-intrusive)
+#             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
     
-    st.session_state.has_tried_login = True
+#     st.session_state.has_tried_login = True
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
