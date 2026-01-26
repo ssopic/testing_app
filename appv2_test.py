@@ -6,12 +6,15 @@ import pandas as pd
 import difflib
 from typing import List, Dict, Any, Optional, Set, Union
 from neo4j import GraphDatabase, Driver, exceptions as neo4j_exceptions
+import uuid
 
 # --- LangChain/Mistral Imports ---
 from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, Field, ValidationError
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
 # ---Visualization and url parsing ---
 import plotly.express as px
@@ -1062,7 +1065,17 @@ def init_app():
     if st.session_state.get("has_tried_login", False):
         return
 
-    # Get defaults from environment
+    # 1. NEW: Setup LangSmith 
+    # This MUST happen here so the library finds the key when the pipeline runs later
+    ls_key = get_config("LANGSMITH_API_KEY") 
+    if ls_key:
+        os.environ["LANGCHAIN_API_KEY"] = ls_key
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+    if "app_session_id" not in st.session_state:
+        st.session_state["app_session_id"] = str(uuid.uuid4())
+
+    # 2. Get DATABASE and mistral keys
     m_key = get_config("MISTRAL_API_KEY")
     n_uri = get_config("NEO4J_URI")
     n_user = get_config("NEO4J_USER", "neo4j")
@@ -1076,7 +1089,6 @@ def init_app():
             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
     
     st.session_state.has_tried_login = True
-
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
