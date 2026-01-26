@@ -35,8 +35,7 @@ if "LANGSMITH_API_KEY" in st.secrets:
 
     # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
     # The error logs showed the app was defaulting to US. This forces EU.
-    os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
-    os.environ["LANGSMITH_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
+    os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
 
 # -------------------------------------------------------------
 
