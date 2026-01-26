@@ -1092,11 +1092,11 @@ def init_app():
 
     # 1. NEW: Setup LangSmith 
     # This MUST happen here so the library finds the key when the pipeline runs later
-    ls_key = get_config("LANGSMITH_API_KEY") 
+    ls_key = get_config("LANGCHAIN_API_KEY") 
     if ls_key:
-        os.environ["LANGSMITH_API_KEY"] = ls_key
-        os.environ["LANGSMITH_TRACING_V2"] = "true"
-        os.environ["LANGSMITH_PROJECT"] = "Testing_analysis_tool"
+        os.environ["LANGCHAIN_API_KEY"] = ls_key
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
     if "app_session_id" not in st.session_state:
         st.session_state["app_session_id"] = str(uuid.uuid4())
 
