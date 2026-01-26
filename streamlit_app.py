@@ -1097,6 +1097,7 @@ def init_app():
         os.environ["LANGCHAIN_API_KEY"] = ls_key
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
         os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+        os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
     if "app_session_id" not in st.session_state:
         st.session_state["app_session_id"] = str(uuid.uuid4())
 
