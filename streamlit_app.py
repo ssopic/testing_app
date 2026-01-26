@@ -887,7 +887,7 @@ class GraphRAGPipeline:
             pipeline_object["status"] = "PLANNING"
             blueprint = self._run_agent("Intent Planner", StructuredBlueprint, {"user_query": user_query})
 
-            pipeline_object["intent_data"] = blueprint.dict() # Save for debugging
+            pipeline_object["intent_data"] = blueprint.model_dump() # Save for debugging
             
             # 2. Schema
             full_schema = self._get_full_schema()
