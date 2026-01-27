@@ -25,17 +25,23 @@ import urllib.parse
 # This block must sit here, at the global level, right after imports.
 # It ensures the library picks up the config before the @traceable decorators run.
 
-if "LANGSMITH_API_KEY" in st.secrets:
-    # 1. Set the API Key
-    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
-    
-    # 2. Set the Project Name
-    os.environ["LANGCHAIN_PROJECT"] = "graph_rag_analysis"
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+def setup_langsmith():
+    """
+    Sets up LangSmith environment variables.
+    NOTE: For decorators like @traceable to work reliably, these variables 
+    should ideally be set at the very top of your script, before other imports/definitions.
+    """
+    if "LANGSMITH_API_KEY" in st.secrets:
+        # 1. Set the API Key
+        os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+        
+        # 2. Set the Project Name
+        os.environ["LANGCHAIN_PROJECT"] = "graph_rag_analysis"
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
-    # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
-    # The error logs showed the app was defaulting to US. This forces EU.
-    os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
+        # 3. FORCE THE EU ENDPOINT
+        # Ensure your API Key was actually created in the EU region!
+        os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
 
 # -------------------------------------------------------------
 
@@ -1388,6 +1394,11 @@ def set_page(page_name):
 def main():
     # 1. Setup & Styling
     st.set_page_config(layout="wide", page_title="Graph Analyst")
+
+    # Initialize LangSmith env vars immediately
+    setup_langsmith()
+
+    # setup css
     inject_custom_css()
     
     # Initialize app (secrets, state)
