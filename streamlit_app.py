@@ -1366,7 +1366,7 @@ def inject_custom_css():
             /* We enforce a dark background on the main app container for the 'Tech' feel */
             .stApp {
                 background-color: #0E1117; /* Deep Slate / Black */
-                color: #FAFAFA;
+                color: #FFFFFF;
             }
 
             .block-container {
@@ -1378,41 +1378,42 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
-            /* High Contrast for Dark Mode */
+            /* Default State now uses the lighter 'Hover' Gray for better visibility */
             div.stButton > button {
                 width: 100%;
-                background-color: #262730; /* Dark Grey Surface */
-                color: #FFFFFF !important; /* Pure White Text for visibility */
-                border: 1px solid #41444C; /* Subtle Border */
-                border-radius: 4px; /* Minimal rounding */
+                background-color: #31333F; /* Lighter Grey (Previously Hover Color) */
+                color: #FFFFFF !important; /* Pure White Text ALWAYS */
+                border: 1px solid #41444C;
+                border-radius: 4px;
                 height: 3.5em;
                 font-family: 'Source Sans Pro', sans-serif;
-                font-weight: 700; /* Bold text */
+                font-weight: 700 !important; /* Force Bold */
                 letter-spacing: 0.5px;
                 transition: all 0.2s ease-in-out;
             }
 
+            /* Hover State - Subtle shift */
             div.stButton > button:hover {
-                background-color: #31333F; 
-                border-color: #00ADB5; /* Cyan Accent Border */
-                color: #00ADB5 !important; /* Cyan Text on Hover */
-                box-shadow: 0 0 8px rgba(0, 173, 181, 0.4); /* Cyan Glow */
+                background-color: #41444C; /* Even lighter on hover */
+                border-color: #FFFFFF; /* White Border */
+                color: #FFFFFF !important; 
+                box-shadow: 0 0 8px rgba(255, 255, 255, 0.3); /* White Glow */
             }
             
-            /* 4. Headers & Text */
-            h1, h2, h3 {
-                font-family: 'Source Sans Pro', sans-serif;
-                color: #FAFAFA;
-                font-weight: 700;
+            /* 4. GLOBAL TEXT STYLING */
+            /* Force all text to be White and Bold for high contrast */
+            h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown, .stText, .stCaption {
+                color: #FFFFFF !important;
+                font-weight: 600 !important; /* Semi-Bold/Bold */
             }
-            
-            /* Subtext/Captions - lighter grey for readability */
-            .stMarkdown p, .stText, .stCaption {
-                color: #B0B0B0 !important;
+
+            /* Specific fix for inputs/selectboxes to ensure text inside is readable */
+            .stTextInput input, .stSelectbox div[data-baseweb="select"] {
+                color: #FFFFFF !important;
+                font-weight: 600;
             }
             
             /* 5. Tighter Dividers */
-            /* Reduces spacing around st.divider() to pull buttons up */
             hr {
                 border-color: #41444C;
                 margin-top: 0.5em !important;
