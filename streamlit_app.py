@@ -1363,14 +1363,13 @@ def inject_custom_css():
             [data-testid="collapsedControl"] { display: none; }
             
             /* 2. Main Layout Adjustment */
-            /* We enforce a dark background on the main app container for the 'Tech' feel */
             .stApp {
                 background-color: #0E1117; /* Deep Slate / Black */
                 color: #FFFFFF;
             }
 
             .block-container {
-                padding-top: 4rem; /* Reduced slightly to pull content up */
+                padding-top: 4rem; 
                 padding-bottom: 2rem;
                 padding-left: 2rem;
                 padding-right: 2rem;
@@ -1378,36 +1377,32 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
-            /* Darker Gray, Static State */
             div.stButton > button {
                 width: 100%;
-                background-color: #1F2129; /* Darker Gray */
-                color: #FFFFFF !important; /* Pure White Text */
+                background-color: #1F2129; 
+                color: #FFFFFF !important; 
                 border: 1px solid #41444C;
                 border-radius: 4px;
                 height: 3.5em;
                 font-family: 'Source Sans Pro', sans-serif;
-                font-weight: 700 !important; /* Force Bold */
+                font-weight: 700 !important;
                 letter-spacing: 0.5px;
-                transition: none; /* Remove animation for static feel */
+                transition: none; 
             }
 
-            /* Hover State - No Color Change, No Glow */
             div.stButton > button:hover {
-                background-color: #1F2129; /* Keep same as default */
-                border-color: #41444C;     /* Keep same as default */
+                background-color: #1F2129; 
+                border-color: #41444C;     
                 color: #FFFFFF !important; 
-                box-shadow: none;          /* Remove glow */
+                box-shadow: none;          
             }
             
             /* 4. GLOBAL TEXT STYLING */
-            /* Force all text to be White and Bold for high contrast */
             h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown, .stText, .stCaption {
                 color: #FFFFFF !important;
-                font-weight: 600 !important; /* Semi-Bold/Bold */
+                font-weight: 600 !important; 
             }
 
-            /* Specific fix for inputs/selectboxes to ensure text inside is readable */
             .stTextInput input, .stSelectbox div[data-baseweb="select"] {
                 color: #FFFFFF !important;
                 font-weight: 600;
@@ -1420,38 +1415,60 @@ def inject_custom_css():
                 margin-bottom: 0.5em !important;
             }
 
-            /* 6. DROPDOWN & EXPANDER FIXES */
-            /* Force Expander (Details/Summary) Background to Dark */
+            /* 6. DROPDOWN & EXPANDER FIXES - ENFORCED DARK MODE */
+            
+            /* Expander Header */
             .streamlit-expanderHeader {
                 background-color: #1F2129 !important;
                 color: #FFFFFF !important;
                 border: 1px solid #41444C;
             }
             
-            /* Fix for Selectbox Dropdown Menu (The popping list) */
-            div[data-baseweb="popover"] {
-                background-color: #1F2129 !important;
-            }
+            /* --- SELECTBOX (DROPDOWN) STYLING --- */
             
-            div[data-baseweb="menu"] {
-                background-color: #1F2129 !important;
-            }
-            
-            /* Ensure options in the dropdown are white */
-            div[data-baseweb="menu"] li {
-                color: #FFFFFF !important;
-            }
-            
-            /* Highlight hover state in dropdowns */
-            div[data-baseweb="menu"] li:hover {
-                background-color: #41444C !important;
-            }
-            
-            /* Fix for the Selectbox container itself when active */
+            /* The main container box of the selectbox */
             div[data-baseweb="select"] > div {
                 background-color: #1F2129 !important;
-                color: #FFFFFF !important;
                 border-color: #41444C !important;
+                color: #FFFFFF !important;
+            }
+            
+            /* Force the background to stay dark even when focused or active */
+            div[data-baseweb="select"] > div:focus-within,
+            div[data-baseweb="select"] > div:active,
+            div[data-baseweb="select"] > div:hover {
+                 background-color: #1F2129 !important;
+            }
+            
+            /* The Text inside the selectbox */
+            div[data-baseweb="select"] span {
+                color: #FFFFFF !important;
+            }
+            
+            /* The SVG Arrow Icon */
+            div[data-baseweb="select"] svg {
+                fill: #FFFFFF !important;
+            }
+            
+            /* --- DROPDOWN MENU (The list that pops up) --- */
+            
+            div[data-baseweb="popover"],
+            div[data-baseweb="menu"] {
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C !important;
+            }
+            
+            /* Options in the list */
+            li[role="option"] {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+            }
+            
+            /* Hover/Selected state for options */
+            li[role="option"]:hover, 
+            li[role="option"][aria-selected="true"] {
+                background-color: #41444C !important;
+                color: #FFFFFF !important;
             }
         </style>
         """,
