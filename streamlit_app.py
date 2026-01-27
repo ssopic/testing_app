@@ -1403,11 +1403,6 @@ def inject_custom_css():
                 font-weight: 600 !important; 
             }
 
-            .stTextInput input, .stSelectbox div[data-baseweb="select"] {
-                color: #FFFFFF !important;
-                font-weight: 600;
-            }
-            
             /* 5. Tighter Dividers */
             hr {
                 border-color: #41444C;
@@ -1415,7 +1410,7 @@ def inject_custom_css():
                 margin-bottom: 0.5em !important;
             }
 
-            /* 6. DROPDOWN & EXPANDER FIXES - ENFORCED DARK MODE */
+            /* 6. DROPDOWN & EXPANDER FIXES - NUCLEAR OPTION */
             
             /* Expander Header */
             .streamlit-expanderHeader {
@@ -1423,76 +1418,77 @@ def inject_custom_css():
                 color: #FFFFFF !important;
                 border: 1px solid #41444C;
             }
+
+            /* --- SELECTBOX FIXES (Targeting data-testid for reliability) --- */
             
-            /* --- SELECTBOX & MULTISELECT DEEP FIX --- */
-            
-            /* Targeting the main control container (div[data-baseweb="select"] > div)
-               AND the text input wrapper (div[data-baseweb="base-input"])
-               to prevent white background on focus/active.
-            */
-            div[data-baseweb="select"] > div,
-            div[data-baseweb="base-input"] {
+            /* The main input container (the box you click) */
+            [data-testid="stSelectbox"] > div > div {
                 background-color: #1F2129 !important;
                 border-color: #41444C !important;
                 color: #FFFFFF !important;
             }
-            
-            /* Aggressive override for ALL interaction states:
-               - hover
-               - active
-               - focus
-               - focus-within
-               - aria-expanded="true" (This is likely the culprit)
-            */
-            div[data-baseweb="select"] > div:hover,
-            div[data-baseweb="select"] > div:active,
-            div[data-baseweb="select"] > div:focus,
-            div[data-baseweb="select"] > div:focus-within,
-            div[data-baseweb="select"] > div[aria-expanded="true"] {
-                background-color: #1F2129 !important;
-                border-color: #00ADB5 !important; /* Add Cyan border to show it's active without changing bg */
+
+            /* The input text itself */
+            [data-testid="stSelectbox"] input {
                 color: #FFFFFF !important;
             }
-            
-            /* Force text color inside the selectbox to always be white */
-            div[data-baseweb="select"] span,
-            div[data-baseweb="select"] div,
-            div[data-baseweb="base-input"] input {
-                color: #FFFFFF !important;
-                -webkit-text-fill-color: #FFFFFF !important;
-                caret-color: #FFFFFF !important;
-            }
-            
-            /* The SVG Arrow Icon */
-            div[data-baseweb="select"] svg {
+
+            /* SVG Icons (Arrows) */
+            [data-testid="stSelectbox"] svg {
                 fill: #FFFFFF !important;
             }
+
+            /* FOCUS / ACTIVE / EXPANDED STATE 
+               This specifically targets the white flash on click. 
+            */
+            [data-testid="stSelectbox"] > div > div:focus-within,
+            [data-testid="stSelectbox"] > div > div:hover,
+            [data-testid="stSelectbox"] > div > div[aria-expanded="true"] {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+                border-color: #00ADB5 !important; /* Cyan highlight */
+            }
+
+            /* Fallback: Target BaseWeb components directly with !important wildcard */
+            div[data-baseweb="select"] * {
+                background-color: inherit !important; 
+                color: #FFFFFF !important; 
+            }
             
-            /* --- DROPDOWN MENU (The list that pops up) --- */
-            
-            div[data-baseweb="popover"],
-            div[data-baseweb="menu"],
-            div[role="listbox"] {
+            /* BUT reset background for the container to avoid transparency issues */
+            div[data-baseweb="select"] > div {
+                background-color: #1F2129 !important;
+            }
+
+            /* --- DROPDOWN MENU (The List) --- */
+            div[data-baseweb="popover"] {
                 background-color: #1F2129 !important;
                 border: 1px solid #41444C !important;
             }
+
+            div[data-baseweb="menu"] {
+                background-color: #1F2129 !important;
+            }
             
-            /* Options in the list */
+            /* List Items */
             li[role="option"] {
                 background-color: #1F2129 !important;
                 color: #FFFFFF !important;
             }
-            
-            /* Hover/Selected state for options */
-            li[role="option"]:hover, 
+
+            /* Hover Item in List */
+            li[role="option"]:hover,
             li[role="option"][aria-selected="true"] {
                 background-color: #41444C !important;
                 color: #FFFFFF !important;
             }
             
-            /* Multiselect Tag styling (just in case) */
+            /* Multiselect Tags */
             span[data-baseweb="tag"] {
                 background-color: #41444C !important;
+                color: #FFFFFF !important;
+            }
+            span[data-baseweb="tag"] span {
                 color: #FFFFFF !important;
             }
         </style>
