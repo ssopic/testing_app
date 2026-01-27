@@ -1424,25 +1424,43 @@ def inject_custom_css():
                 border: 1px solid #41444C;
             }
             
-            /* --- SELECTBOX (DROPDOWN) STYLING --- */
+            /* --- SELECTBOX & MULTISELECT DEEP FIX --- */
             
-            /* The main container box of the selectbox */
-            div[data-baseweb="select"] > div {
+            /* Targeting the main control container (div[data-baseweb="select"] > div)
+               AND the text input wrapper (div[data-baseweb="base-input"])
+               to prevent white background on focus/active.
+            */
+            div[data-baseweb="select"] > div,
+            div[data-baseweb="base-input"] {
                 background-color: #1F2129 !important;
                 border-color: #41444C !important;
                 color: #FFFFFF !important;
             }
             
-            /* Force the background to stay dark even when focused or active */
-            div[data-baseweb="select"] > div:focus-within,
+            /* Aggressive override for ALL interaction states:
+               - hover
+               - active
+               - focus
+               - focus-within
+               - aria-expanded="true" (This is likely the culprit)
+            */
+            div[data-baseweb="select"] > div:hover,
             div[data-baseweb="select"] > div:active,
-            div[data-baseweb="select"] > div:hover {
-                 background-color: #1F2129 !important;
+            div[data-baseweb="select"] > div:focus,
+            div[data-baseweb="select"] > div:focus-within,
+            div[data-baseweb="select"] > div[aria-expanded="true"] {
+                background-color: #1F2129 !important;
+                border-color: #00ADB5 !important; /* Add Cyan border to show it's active without changing bg */
+                color: #FFFFFF !important;
             }
             
-            /* The Text inside the selectbox */
-            div[data-baseweb="select"] span {
+            /* Force text color inside the selectbox to always be white */
+            div[data-baseweb="select"] span,
+            div[data-baseweb="select"] div,
+            div[data-baseweb="base-input"] input {
                 color: #FFFFFF !important;
+                -webkit-text-fill-color: #FFFFFF !important;
+                caret-color: #FFFFFF !important;
             }
             
             /* The SVG Arrow Icon */
@@ -1453,7 +1471,8 @@ def inject_custom_css():
             /* --- DROPDOWN MENU (The list that pops up) --- */
             
             div[data-baseweb="popover"],
-            div[data-baseweb="menu"] {
+            div[data-baseweb="menu"],
+            div[role="listbox"] {
                 background-color: #1F2129 !important;
                 border: 1px solid #41444C !important;
             }
@@ -1470,10 +1489,17 @@ def inject_custom_css():
                 background-color: #41444C !important;
                 color: #FFFFFF !important;
             }
+            
+            /* Multiselect Tag styling (just in case) */
+            span[data-baseweb="tag"] {
+                background-color: #41444C !important;
+                color: #FFFFFF !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
     )
+    
 def set_page(page_name):
     """Helper to update the current page in session state."""
     st.session_state.current_page = page_name
