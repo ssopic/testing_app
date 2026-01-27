@@ -1387,14 +1387,15 @@ def inject_custom_css():
                 font-family: 'Source Sans Pro', sans-serif;
                 font-weight: 700 !important;
                 letter-spacing: 0.5px;
-                transition: none; 
+                transition: all 0.2s ease-in-out; 
             }
 
+            /* ACCENT: Cyan Border & Text on Hover */
             div.stButton > button:hover {
                 background-color: #1F2129; 
-                border-color: #41444C;     
-                color: #FFFFFF !important; 
-                box-shadow: none;          
+                border-color: #00ADB5 !important; /* Cyan Accent */     
+                color: #00ADB5 !important;        /* Cyan Text */
+                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3); /* Subtle Glow */          
             }
             
             /* 4. GLOBAL TEXT STYLING */
@@ -1427,12 +1428,14 @@ def inject_custom_css():
                 color: #FFFFFF !important;
                 border: 1px solid #41444C !important;
                 border-radius: 4px;
+                transition: border-color 0.2s, color 0.2s;
             }
 
-            /* Hover state for the Header */
+            /* ACCENT: Hover state for the Expander Header */
             div[data-testid="stExpander"] summary:hover {
-                background-color: #31333F !important; /* Slightly lighter on hover */
-                color: #00ADB5 !important; /* Cyan text */
+                background-color: #1F2129 !important; 
+                border-color: #00ADB5 !important; /* Cyan Border */
+                color: #00ADB5 !important; /* Cyan Text */
             }
 
             /* Force the text inside the summary (the label) to be white/cyan */
@@ -1453,6 +1456,7 @@ def inject_custom_css():
             div[data-testid="stExpander"] div[role="group"] {
                  background-color: #0E1117 !important; /* Match main background */
                  color: #FFFFFF !important;
+                 border: 1px solid #41444C;
             }
 
             /* 7. CHECKBOX & INPUT FIXES INSIDE EXPANDER */
@@ -1462,13 +1466,19 @@ def inject_custom_css():
                 color: #FFFFFF !important;
             }
             
+            /* ACCENT: Input Focus States */
             /* Text Input field styling */
             div[data-baseweb="input"] {
                 background-color: #1F2129 !important;
-                border-color: #41444C !important;
+                border: 1px solid #41444C !important; 
             }
             div[data-baseweb="input"] input {
                 color: #FFFFFF !important;
+            }
+            /* Focus Accent for Inputs */
+            div[data-baseweb="input"]:focus-within {
+                border-color: #00ADB5 !important;
+                box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
             }
         </style>
         """,
