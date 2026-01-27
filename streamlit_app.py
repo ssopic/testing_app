@@ -1358,29 +1358,49 @@ def inject_custom_css():
     st.markdown(
         """
         <style>
-            /* 1. Hide the default Streamlit Sidebar and the collapse button */
-            [data-testid="stSidebar"] {
-                display: none;
-            }
-            [data-testid="collapsedControl"] {
-                display: none;
-            }
+            /* 1. Hide the default Streamlit Sidebar elements */
+            [data-testid="stSidebar"] { display: none; }
+            [data-testid="collapsedControl"] { display: none; }
             
-            /* 2. Optional: Adjust main container padding to maximize space */
+            /* 2. Main Container Padding */
             .block-container {
-                padding-top: 2rem;
+                padding-top: 1rem;
                 padding-bottom: 2rem;
                 padding-left: 2rem;
                 padding-right: 2rem;
+                max_width: 100%;
             }
 
-            /* 3. Style buttons in side columns to look more like 'tabs' */
-            /* Note: This targets buttons inside the side columns specifically if we could scope them, 
-               but Streamlit CSS scoping is tricky. For now, we make all buttons full width for a cleaner look. */
+            /* 3. COCKPIT BUTTON STYLING */
+            /* This targets buttons to give them a 'nav-item' feel */
             div.stButton > button {
                 width: 100%;
-                border-radius: 8px;
-                height: 3em;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                background-color: #f8f9fa; /* Light grey for contrast */
+                color: #262730;
+                height: 3.5em; /* Taller for better clickability */
+                font-weight: 500;
+                transition: all 0.2s ease;
+            }
+
+            div.stButton > button:hover {
+                border-color: #ff4b4b; /* Streamlit Red accent on hover */
+                background-color: #ffffff;
+                color: #ff4b4b;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            /* 4. Center Area Focus */
+            /* We can't easily target just the center column, but we can style the headers */
+            h1, h2, h3 {
+                font-family: 'Source Sans Pro', sans-serif;
+            }
+            
+            hr {
+                margin-top: 1em; 
+                margin-bottom: 1em;
+                border-color: #eee;
             }
         </style>
         """,
