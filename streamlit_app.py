@@ -1410,43 +1410,64 @@ def inject_custom_css():
                 margin-bottom: 0.5em !important;
             }
 
-            /* 6. EXPANDER SPECIFIC STYLING (The "Dropdown" fix) */
+            /* 6. EXPANDER (DATABOOK DROPDOWNS) FIX */
             
-            /* The Clickable Header Bar */
-            .streamlit-expanderHeader {
-                background-color: #1F2129 !important; /* Force Dark Grey */
+            /* Target the HTML <details> and <summary> elements directly */
+            
+            /* The Container (Closed state usually) */
+            div[data-testid="stExpander"] details {
+                background-color: #1F2129 !important;
+                border-color: #41444C !important;
+                border-radius: 4px;
+            }
+
+            /* The Clickable Header (Summary) */
+            div[data-testid="stExpander"] summary {
+                background-color: #1F2129 !important;
                 color: #FFFFFF !important;
-                border: 1px solid #41444C;
+                border: 1px solid #41444C !important;
                 border-radius: 4px;
             }
 
             /* Hover state for the Header */
-            .streamlit-expanderHeader:hover {
+            div[data-testid="stExpander"] summary:hover {
                 background-color: #31333F !important; /* Slightly lighter on hover */
-                color: #00ADB5 !important; /* Cyan text on hover */
-                border-color: #00ADB5 !important;
+                color: #00ADB5 !important; /* Cyan text */
+            }
+
+            /* Force the text inside the summary (the label) to be white/cyan */
+            div[data-testid="stExpander"] summary span,
+            div[data-testid="stExpander"] summary p {
+                 color: inherit !important;
             }
 
             /* The SVG Arrow inside the header */
-            .streamlit-expanderHeader svg {
+            div[data-testid="stExpander"] summary svg {
                 fill: #FFFFFF !important;
             }
-            .streamlit-expanderHeader:hover svg {
+            div[data-testid="stExpander"] summary:hover svg {
                 fill: #00ADB5 !important;
             }
             
             /* The Content Box that opens up */
-            .streamlit-expanderContent {
-                background-color: #0E1117 !important; /* Match app background or slightly lighter */
+            div[data-testid="stExpander"] div[role="group"] {
+                 background-color: #0E1117 !important; /* Match main background */
+                 color: #FFFFFF !important;
+            }
+
+            /* 7. CHECKBOX & INPUT FIXES INSIDE EXPANDER */
+            
+            /* Checkbox Label Text */
+            label[data-baseweb="checkbox"] span {
                 color: #FFFFFF !important;
-                border: 1px solid #41444C;
-                border-top: none; /* Looks connected to header */
             }
             
-            /* Fix for text inside the expander content */
-            .streamlit-expanderContent p, 
-            .streamlit-expanderContent span,
-            .streamlit-expanderContent div {
+            /* Text Input field styling */
+            div[data-baseweb="input"] {
+                background-color: #1F2129 !important;
+                border-color: #41444C !important;
+            }
+            div[data-baseweb="input"] input {
                 color: #FFFFFF !important;
             }
         </style>
