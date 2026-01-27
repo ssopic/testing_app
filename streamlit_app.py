@@ -1410,86 +1410,40 @@ def inject_custom_css():
                 margin-bottom: 0.5em !important;
             }
 
-            /* 6. DROPDOWN & EXPANDER FIXES - NUCLEAR OPTION */
+            /* 6. DROPDOWN & EXPANDER FIXES - TEXT OUTLINE STRATEGY */
             
-            /* Expander Header */
+            /* Apply a black text shadow (outline) to ensure readability on ANY background */
+            .streamlit-expanderHeader,
+            .stTextInput input,
+            .stSelectbox div,
+            .stSelectbox span,
+            div[data-baseweb="select"] span,
+            div[data-baseweb="popover"] li,
+            div[role="listbox"] span {
+                color: #FFFFFF !important;
+                text-shadow: 
+                    -1px -1px 0 #000,  
+                     1px -1px 0 #000,
+                    -1px  1px 0 #000,
+                     1px  1px 0 #000 !important;
+            }
+
+            /* Expander Header Specifics */
             .streamlit-expanderHeader {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-                border: 1px solid #FFFFFF;
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C;
             }
-
-            /* --- SELECTBOX FIXES (Targeting data-testid for reliability) --- */
             
-            /* The main input container (the box you click) */
-            [data-testid="stSelectbox"] > div > div {
-                background-color: #FFFFFF !important;
-                border-color: #41444C !important;
-                color: #FFFFFF !important;
+            /* Ensure the SVG arrow is visible */
+            .streamlit-expanderHeader svg {
+                fill: #FFFFFF !important;
+                filter: drop-shadow(0px 0px 1px black);
             }
 
-            /* The input text itself */
-            [data-testid="stSelectbox"] input {
-                color: #FFFFFF !important;
-            }
-
-            /* SVG Icons (Arrows) */
+            /* Selectbox Specifics */
             [data-testid="stSelectbox"] svg {
                 fill: #FFFFFF !important;
-            }
-
-            /* FOCUS / ACTIVE / EXPANDED STATE 
-               This specifically targets the white flash on click. 
-            */
-            [data-testid="stSelectbox"] > div > div:focus-within,
-            [data-testid="stSelectbox"] > div > div:hover,
-            [data-testid="stSelectbox"] > div > div[aria-expanded="true"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-                border-color: #00ADB5 !important; /* Cyan highlight */
-            }
-
-            /* Fallback: Target BaseWeb components directly with !important wildcard */
-            div[data-baseweb="select"] * {
-                background-color: inherit !important; 
-                color: #FFFFFF !important; 
-            }
-            
-            /* BUT reset background for the container to avoid transparency issues */
-            div[data-baseweb="select"] > div {
-                background-color: #FFFFFF !important;
-            }
-
-            /* --- DROPDOWN MENU (The List) --- */
-            div[data-baseweb="popover"] {
-                background-color: #FFFFFF !important;
-                border: 1px solid #41444C !important;
-            }
-
-            div[data-baseweb="menu"] {
-                background-color: #1F2129 !important;
-            }
-            
-            /* List Items */
-            li[role="option"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-            }
-
-            /* Hover Item in List */
-            li[role="option"]:hover,
-            li[role="option"][aria-selected="true"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-            }
-            
-            /* Multiselect Tags */
-            span[data-baseweb="tag"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-            }
-            span[data-baseweb="tag"] span {
-                color: #FFFFFF !important;
+                filter: drop-shadow(0px 0px 1px black);
             }
         </style>
         """,
