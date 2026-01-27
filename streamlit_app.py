@@ -1416,14 +1416,14 @@ def inject_custom_css():
             .streamlit-expanderHeader {
                 background-color: #FFFFFF !important;
                 color: #FFFFFF !important;
-                border: 1px solid #41444C;
+                border: 1px solid #FFFFFF;
             }
 
             /* --- SELECTBOX FIXES (Targeting data-testid for reliability) --- */
             
             /* The main input container (the box you click) */
             [data-testid="stSelectbox"] > div > div {
-                background-color: #1F2129 !important;
+                background-color: #FFFFFF !important;
                 border-color: #41444C !important;
                 color: #FFFFFF !important;
             }
@@ -1444,7 +1444,7 @@ def inject_custom_css():
             [data-testid="stSelectbox"] > div > div:focus-within,
             [data-testid="stSelectbox"] > div > div:hover,
             [data-testid="stSelectbox"] > div > div[aria-expanded="true"] {
-                background-color: #1F2129 !important;
+                background-color: #FFFFFF !important;
                 color: #FFFFFF !important;
                 border-color: #00ADB5 !important; /* Cyan highlight */
             }
@@ -1457,12 +1457,12 @@ def inject_custom_css():
             
             /* BUT reset background for the container to avoid transparency issues */
             div[data-baseweb="select"] > div {
-                background-color: #1F2129 !important;
+                background-color: #FFFFFF !important;
             }
 
             /* --- DROPDOWN MENU (The List) --- */
             div[data-baseweb="popover"] {
-                background-color: #1F2129 !important;
+                background-color: #FFFFFF !important;
                 border: 1px solid #41444C !important;
             }
 
@@ -1472,20 +1472,20 @@ def inject_custom_css():
             
             /* List Items */
             li[role="option"] {
-                background-color: #1F2129 !important;
+                background-color: #FFFFFF !important;
                 color: #FFFFFF !important;
             }
 
             /* Hover Item in List */
             li[role="option"]:hover,
             li[role="option"][aria-selected="true"] {
-                background-color: #41444C !important;
+                background-color: #FFFFFF !important;
                 color: #FFFFFF !important;
             }
             
             /* Multiselect Tags */
             span[data-baseweb="tag"] {
-                background-color: #41444C !important;
+                background-color: #FFFFFF !important;
                 color: #FFFFFF !important;
             }
             span[data-baseweb="tag"] span {
