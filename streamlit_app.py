@@ -261,7 +261,7 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
 # 3. FRAGMENT: WORKSPACE
 # ==========================================
 
-@st.fragment
+#@st.fragment
 # ==============================================================================
 # UPDATED BACKEND: VERB SUPPORT
 # ==============================================================================
