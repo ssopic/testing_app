@@ -1370,7 +1370,7 @@ def inject_custom_css():
             }
 
             .block-container {
-                padding-top: 5rem; /* Prevent header overlap */
+                padding-top: 4rem; /* Reduced slightly to pull content up */
                 padding-bottom: 2rem;
                 padding-left: 2rem;
                 padding-right: 2rem;
@@ -1378,25 +1378,25 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
-            /* Flat, dark, slightly rounded with a tech-cyan accent on hover */
+            /* High Contrast for Dark Mode */
             div.stButton > button {
                 width: 100%;
                 background-color: #262730; /* Dark Grey Surface */
-                color: #E0E0E0; /* Off-white text */
+                color: #FFFFFF !important; /* Pure White Text for visibility */
                 border: 1px solid #41444C; /* Subtle Border */
-                border-radius: 4px; /* Minimal rounding for tech look */
+                border-radius: 4px; /* Minimal rounding */
                 height: 3.5em;
                 font-family: 'Source Sans Pro', sans-serif;
-                font-weight: 600;
+                font-weight: 700; /* Bold text */
                 letter-spacing: 0.5px;
                 transition: all 0.2s ease-in-out;
             }
 
             div.stButton > button:hover {
-                background-color: #31333F; /* Slightly lighter on hover */
+                background-color: #31333F; 
                 border-color: #00ADB5; /* Cyan Accent Border */
-                color: #00ADB5; /* Cyan Text */
-                box-shadow: 0 0 8px rgba(0, 173, 181, 0.4); /* Subtle Cyan Glow */
+                color: #00ADB5 !important; /* Cyan Text on Hover */
+                box-shadow: 0 0 8px rgba(0, 173, 181, 0.4); /* Cyan Glow */
             }
             
             /* 4. Headers & Text */
@@ -1406,16 +1406,17 @@ def inject_custom_css():
                 font-weight: 700;
             }
             
-            /* Subtext/Captions */
-            .stMarkdown p, .stText {
-                color: #B0B0B0;
+            /* Subtext/Captions - lighter grey for readability */
+            .stMarkdown p, .stText, .stCaption {
+                color: #B0B0B0 !important;
             }
             
-            /* 5. Divider Styling */
+            /* 5. Tighter Dividers */
+            /* Reduces spacing around st.divider() to pull buttons up */
             hr {
                 border-color: #41444C;
-                margin-top: 1.5em;
-                margin-bottom: 1.5em;
+                margin-top: 0.5em !important;
+                margin-bottom: 0.5em !important;
             }
         </style>
         """,
