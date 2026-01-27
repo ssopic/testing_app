@@ -21,7 +21,48 @@ import plotly.express as px
 import urllib.parse
 
 
+# --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
+# This block must sit here, at the global level, right after imports.
+# It ensures the library picks up the config before the @traceable decorators run.
 
+if "LANGSMITH_API_KEY" in st.secrets:
+    # 1. Set the API Key
+    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+    
+    # 2. Set the Project Name
+    os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+
+    # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
+    # The error logs showed the app was defaulting to US. This forces EU.
+    os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
+
+# -------------------------------------------------------------
+
+def init_app():
+    """
+    Runs once on app startup. 
+    Now simplified because LangSmith setup is handled globally above.
+    """
+    # Initialize Session ID
+    if "app_session_id" not in st.session_state:
+        st.session_state["app_session_id"] = str(uuid.uuid4())
+
+    if st.session_state.get("has_tried_login", False):
+        return
+
+    # Existing credential logic...
+    m_key = get_config("MISTRAL_API_KEY")
+    n_uri = get_config("NEO4J_URI")
+    n_user = get_config("NEO4J_USER", "neo4j")
+    n_pass = get_config("NEO4J_PASSWORD")
+
+    if n_uri and n_pass and m_key:
+        success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+        if not success:
+            st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
+    
+    st.session_state.has_tried_login = True
 # ==========================================
 ### NEW DATABOOK ###
 # ==========================================
@@ -836,34 +877,58 @@ class GraphRAGPipeline:
     def _check_query_safety(self, cypher: str) -> bool:
         return not bool(SAFETY_REGEX.search(cypher))
 
+    @traceable 
     def _run_agent(self, agent_name: str, output_model: BaseModel, context: Dict) -> Any:
+        
+        # ---  Dynamic Renaming Logic ---
+        rt = get_current_run_tree()
+        if rt:
+            rt.name = agent_name
+        # ---------------------------------
+
         sys_prompt = SYSTEM_PROMPTS.get(agent_name, "")
+        
         formatted_context = {}
         for k, v in context.items():
-            if isinstance(v, BaseModel): formatted_context[k] = v.model_dump_json(indent=2)
-            elif isinstance(v, (dict, list)): formatted_context[k] = json.dumps(v, indent=2)
-            else: formatted_context[k] = str(v)
+            if isinstance(v, BaseModel): 
+                formatted_context[k] = v.model_dump_json(indent=2)
+            elif isinstance(v, (dict, list)): 
+                formatted_context[k] = json.dumps(v, indent=2)
+            else: 
+                formatted_context[k] = str(v)
 
         msgs = [("system", sys_prompt)]
         
         # Prompt Mapping
-        if agent_name == "Intent Planner": msgs.append(("human", "QUERY: {user_query}"))
-        elif agent_name == "Schema Selector": msgs.append(("human", "BLUEPRINT: {blueprint}\nFULL_SCHEMA: {full_schema}"))
-        elif agent_name == "Grounding Agent": msgs.append(("human", "BLUEPRINT: {blueprint}\nSCHEMA: {schema}\nQUERY: {user_query}"))
-        elif agent_name == "Cypher Generator": msgs.append(("human", "GROUNDED_COMPONENT: {blueprint}"))
-        elif agent_name == "Query Debugger": msgs.append(("human", "ERROR: {error}\nQUERY: {failed_query}\nBLUEPRINT: {blueprint}\nWARNINGS: {warnings}"))
-        elif agent_name == "Synthesizer": msgs.append(("human", "QUERY: {user_query}\nCYPHER: {final_cypher}\nRESULTS: {db_result}"))
+        if agent_name == "Intent Planner": 
+            msgs.append(("human", "QUERY: {user_query}"))
+        elif agent_name == "Schema Selector": 
+            msgs.append(("human", "BLUEPRINT: {blueprint}\nFULL_SCHEMA: {full_schema}"))
+        elif agent_name == "Grounding Agent": 
+            msgs.append(("human", "BLUEPRINT: {blueprint}\nSCHEMA: {schema}\nQUERY: {user_query}"))
+        elif agent_name == "Cypher Generator": 
+            msgs.append(("human", "GROUNDED_COMPONENT: {blueprint}"))
+        elif agent_name == "Query Debugger": 
+            msgs.append(("human", "ERROR: {error}\nQUERY: {failed_query}\nBLUEPRINT: {blueprint}\nWARNINGS: {warnings}"))
+        elif agent_name == "Synthesizer": 
+            msgs.append(("human", "QUERY: {user_query}\nCYPHER: {final_cypher}\nRESULTS: {db_result}"))
         
         prompt = ChatPromptTemplate.from_messages(msgs)
         return (prompt | self.llm.with_structured_output(output_model)).invoke(formatted_context)
-
-    def run(self, user_query: str) -> Dict[str, Any]:
+        
+    @traceable(name="GraphRAG Main Pipeline")
+    def run(self, user_query: str, session_id: str = "default") -> Dict[str, Any]:
+        rt = get_current_run_tree()
+        if rt:
+            rt.add_metadata({"session_id": session_id})
         pipeline_object = {"user_query": user_query, "status": "INIT", "execution_history": [], "proof_ids": []}
         
         try:
             # 1. Intent
             pipeline_object["status"] = "PLANNING"
             blueprint = self._run_agent("Intent Planner", StructuredBlueprint, {"user_query": user_query})
+
+            pipeline_object["intent_data"] = blueprint.model_dump() # Save for debugging
             
             # 2. Schema
             full_schema = self._get_full_schema()
@@ -871,6 +936,7 @@ class GraphRAGPipeline:
             
             # 3. Grounding
             grounding = self._run_agent("Grounding Agent", GroundingOutput, {"blueprint": blueprint, "schema": pruned_schema.model_dump(), "user_query": user_query})
+            pipeline_object["grounding_data"] = grounding.model_dump() # Save for debugging
             
             grounded_comp = GroundedComponent(
                 source_node_label=grounding.source_node_label,
@@ -1058,37 +1124,39 @@ def show_settings_dialog():
             else:
                 st.error(msg)
 
-def init_app():
-    """
-    Runs once on app startup to try auto-login using Secrets/Env Vars.
-    """
-    if st.session_state.get("has_tried_login", False):
-        return
+#old version. probabbly going to delete
+# def init_app():
+#     """
+#     Runs once on app startup to try auto-login using Secrets/Env Vars.
+#     """
+#     if st.session_state.get("has_tried_login", False):
+#         return
 
-    # 1. NEW: Setup LangSmith 
-    # This MUST happen here so the library finds the key when the pipeline runs later
-    ls_key = get_config("LANGSMITH_API_KEY") 
-    if ls_key:
-        os.environ["LANGCHAIN_API_KEY"] = ls_key
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
-    if "app_session_id" not in st.session_state:
-        st.session_state["app_session_id"] = str(uuid.uuid4())
+#     # 1. NEW: Setup LangSmith 
+#     # This MUST happen here so the library finds the key when the pipeline runs later
+#     ls_key = get_config("LANGCHAIN_API_KEY") 
+#     if ls_key:
+#         os.environ["LANGCHAIN_API_KEY"] = ls_key
+#         os.environ["LANGCHAIN_TRACING_V2"] = "true"
+#         os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+#         os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
+#     if "app_session_id" not in st.session_state:
+#         st.session_state["app_session_id"] = str(uuid.uuid4())
 
-    # 2. Get DATABASE and mistral keys
-    m_key = get_config("MISTRAL_API_KEY")
-    n_uri = get_config("NEO4J_URI")
-    n_user = get_config("NEO4J_USER", "neo4j")
-    n_pass = get_config("NEO4J_PASSWORD")
+#     # 2. Get DATABASE and mistral keys
+#     m_key = get_config("MISTRAL_API_KEY")
+#     n_uri = get_config("NEO4J_URI")
+#     n_user = get_config("NEO4J_USER", "neo4j")
+#     n_pass = get_config("NEO4J_PASSWORD")
 
-    # Only attempt if we actually have credentials
-    if n_uri and n_pass and m_key:
-        success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
-        if not success:
-            # Pop-up toast notification of failure (non-intrusive)
-            st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
+#     # Only attempt if we actually have credentials
+#     if n_uri and n_pass and m_key:
+#         success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+#         if not success:
+#             # Pop-up toast notification of failure (non-intrusive)
+#             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
     
-    st.session_state.has_tried_login = True
+#     st.session_state.has_tried_login = True
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
@@ -1123,7 +1191,7 @@ def screen_extraction():
             
             with st.chat_message("assistant"):
                 with st.spinner("Analyzing public dataset..."):
-                    result = pipeline.run(user_msg)
+                    result = pipeline.run(user_msg, session_id=st.session_state["app_session_id"])
                     
                     if result.get("status") == "ERROR":
                         err_msg = result.get("error", "Unknown Error")
@@ -1135,8 +1203,13 @@ def screen_extraction():
                         st.write(ans)
                         
                         if result.get("cypher_query"):
-                            with st.expander("Generated Cypher"):
-                                st.code(result["cypher_query"], language="cypher")
+                            with st.expander("🕵️ Analysis Details (Cypher & Trace)"):
+                                if result.get("cypher_query"):
+                                    st.caption("Generated Cypher:")
+                                    st.code(result["cypher_query"], language="cypher")
+                                
+                                st.caption("Full Pipeline Trace Data:")
+                                st.json(result) # This shows the Intent/Grounding data we saved!
 
                         st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
                         
