@@ -1362,60 +1362,60 @@ def inject_custom_css():
             [data-testid="stSidebar"] { display: none; }
             [data-testid="collapsedControl"] { display: none; }
             
-            /* 2. Main Container Padding & Crazy Background */
-            /* INCREASED padding-top to 5rem to prevent top cropping */
+            /* 2. Main Layout Adjustment */
+            /* We enforce a dark background on the main app container for the 'Tech' feel */
+            .stApp {
+                background-color: #0E1117; /* Deep Slate / Black */
+                color: #FAFAFA;
+            }
+
             .block-container {
-                padding-top: 5rem;
+                padding-top: 5rem; /* Prevent header overlap */
                 padding-bottom: 2rem;
                 padding-left: 2rem;
                 padding-right: 2rem;
                 max_width: 100%;
-                background-color: #2b003b; /* Deep Purple Background for stress test */
-                font-family: 'Courier New', monospace; /* Monospace font */
-                color: #00ff00; /* Neon Green Text */
             }
 
-            /* 3. COCKPIT BUTTON STYLING - EXTREME EDITION */
-            /* This targets buttons to give them a 'nav-item' feel */
+            /* 3. TECH BUTTON STYLING */
+            /* Flat, dark, slightly rounded with a tech-cyan accent on hover */
             div.stButton > button {
                 width: 100%;
-                border: 3px dashed #ff00ff; /* Hot Pink Dashed Border */
-                border-radius: 15px;
-                background-color: #000000; /* Black Button Background */
-                color: #ffff00; /* Yellow Text */
-                height: 4em; /* Even Taller */
-                font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; /* The chaos font */
-                font-weight: 900;
-                text-transform: uppercase;
-                letter-spacing: 2px;
-                transition: all 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55); /* Bouncy transition */
+                background-color: #262730; /* Dark Grey Surface */
+                color: #E0E0E0; /* Off-white text */
+                border: 1px solid #41444C; /* Subtle Border */
+                border-radius: 4px; /* Minimal rounding for tech look */
+                height: 3.5em;
+                font-family: 'Source Sans Pro', sans-serif;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                transition: all 0.2s ease-in-out;
             }
 
             div.stButton > button:hover {
-                border-color: #00ff00; /* Neon Green Border */
-                background-color: #ff00ff; /* Hot Pink Background */
-                color: #ffffff; /* White Text */
-                box-shadow: 10px 10px 0px rgba(0,255,0,0.8); /* Hard shadow */
-                transform: scale(1.05) rotate(-2deg); /* Tilt and grow */
+                background-color: #31333F; /* Slightly lighter on hover */
+                border-color: #00ADB5; /* Cyan Accent Border */
+                color: #00ADB5; /* Cyan Text */
+                box-shadow: 0 0 8px rgba(0, 173, 181, 0.4); /* Subtle Cyan Glow */
             }
             
-            /* 4. Center Area Focus */
-            /* We can't easily target just the center column, but we can style the headers */
+            /* 4. Headers & Text */
             h1, h2, h3 {
-                font-family: 'Impact', fantasy;
-                color: #ff4b4b;
-                text-shadow: 2px 2px #000000;
+                font-family: 'Source Sans Pro', sans-serif;
+                color: #FAFAFA;
+                font-weight: 700;
             }
             
+            /* Subtext/Captions */
+            .stMarkdown p, .stText {
+                color: #B0B0B0;
+            }
+            
+            /* 5. Divider Styling */
             hr {
-                margin-top: 1em; 
-                margin-bottom: 1em;
-                border: 2px solid #00ff00;
-            }
-            
-            /* Make markdown text readable against dark background */
-            .stMarkdown, .stText {
-                color: #e0e0e0 !important;
+                border-color: #41444C;
+                margin-top: 1.5em;
+                margin-bottom: 1.5em;
             }
         </style>
         """,
