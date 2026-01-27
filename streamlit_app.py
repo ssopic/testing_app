@@ -1345,45 +1345,134 @@ def screen_analysis():
 
 
 # --- MAIN NAVIGATION ---
+def inject_custom_css():
+    """
+    Hides the standard Streamlit sidebar and applies styling for the cockpit layout.
+    """
+    st.markdown(
+        """
+        <style>
+            /* 1. Hide the default Streamlit Sidebar and the collapse button */
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+            [data-testid="collapsedControl"] {
+                display: none;
+            }
+            
+            /* 2. Optional: Adjust main container padding to maximize space */
+            .block-container {
+                padding-top: 2rem;
+                padding-bottom: 2rem;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
 
-# 1. Try to initialize (Auto-connect on startup)
-init_app()
+            /* 3. Style buttons in side columns to look more like 'tabs' */
+            /* Note: This targets buttons inside the side columns specifically if we could scope them, 
+               but Streamlit CSS scoping is tricky. For now, we make all buttons full width for a cleaner look. */
+            div.stButton > button {
+                width: 100%;
+                border-radius: 8px;
+                height: 3em;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
-# 2. Sidebar Navigation
-with st.sidebar:
-    st.header("Graph Analyst")
+def set_page(page_name):
+    """Helper to update the current page in session state."""
+    st.session_state.current_page = page_name
+
+def main():
+    # 1. Setup & Styling
+    st.set_page_config(layout="wide", page_title="Graph Analyst")
+    inject_custom_css()
     
-    # Navigation Options
-    nav_options = ["Databook", "Search", "Locker", "Analysis"]
-    nav = st.radio("Navigation", nav_options)
-    
-    st.divider()
-    
-    # NEW: Settings Button (Opens the pop-up dialog)
-    if st.button("⚙️ Settings"):
-        show_settings_dialog()
-    
-    # NEW: Connection Status & Logout
-    if st.session_state.app_state["connected"]:
-        st.caption("🟢 Connected")
-        if st.button("Logout"):
+    # Initialize app (secrets, state)
+    init_app()
+
+    # Initialize Page State if not present
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "Databook"
+
+    # 2. Connection Gatekeeper
+    if not st.session_state.app_state["connected"]:
+        # Disconnected View
+        st.info("👋 Welcome! The app is disconnected.\n\n"
+                "If you set up your Secrets correctly, this should not appear.\n\n"
+                "Otherwise, click **⚙️ Settings** below to connect manually.")
+        
+        # Simple disconnected layout
+        if st.button("⚙️ Settings"):
+            show_settings_dialog()
+        return
+
+    # 3. Cockpit Layout (3 Columns)
+    # Ratios: [Left Nav: 1] - [Main Content: 10] - [Right Nav: 1]
+    # You can adjust these ratios (e.g., [1, 8, 1]) if the sidebars feel too narrow.
+    c_left, c_main, c_right = st.columns([1, 10, 1])
+
+    # --- LEFT COLUMN (Input & Config) ---
+    with c_left:
+        st.write("### 📥") # Icon header or similar
+        
+        # Navigation Buttons
+        if st.button("📖 Data", help="Go to Databook", use_container_width=True):
+            set_page("Databook")
+            
+        if st.button("🔍 Search", help="Go to Extraction", use_container_width=True):
+            set_page("Search")
+
+        # Vertical Spacer to push settings to bottom
+        # Streamlit doesn't have a native "push to bottom", so we use empty lines or a container hack.
+        st.write("") 
+        st.write("")
+        st.write("")
+        
+        st.divider()
+        
+        if st.button("⚙️ Config", help="Settings", use_container_width=True):
+            show_settings_dialog()
+
+    # --- CENTER COLUMN (Main Router) ---
+    with c_main:
+        # Router Logic
+        current = st.session_state.current_page
+        
+        if current == "Databook":
+            screen_databook()
+        elif current == "Search":
+            screen_extraction()
+        elif current == "Locker":
+            screen_locker()
+        elif current == "Analysis":
+            screen_analysis()
+        else:
+            st.error(f"Unknown page: {current}")
+
+    # --- RIGHT COLUMN (Output & Tools) ---
+    with c_right:
+        st.write("### 📤")
+        
+        # Locker Badge Calculation
+        locker_count = len(st.session_state.app_state["evidence_locker"])
+        locker_label = f"🗄️ Locker ({locker_count})"
+        
+        if st.button(locker_label, help="View Evidence Locker", use_container_width=True):
+            set_page("Locker")
+            
+        if st.button("📈 Analysis", help="Go to Analysis", use_container_width=True):
+            set_page("Analysis")
+            
+        st.divider()
+        
+        # Logout
+        if st.button("Logout", use_container_width=True):
             st.session_state.app_state["connected"] = False
-            st.session_state.has_tried_login = False # Reset so it doesn't auto-login immediately
+            st.session_state.has_tried_login = False
             st.rerun()
-    else:
-        st.caption("🔴 Disconnected")
 
-# 3. Main Content Router
-if not st.session_state.app_state["connected"]:
-    # Landing message instead of the old 'screen_connection()'
-    st.info("👋 Welcome! The app is disconnected.\n\nIf you set up your Secrets correctly, this should not appear.\n\nOtherwise, click **⚙️ Settings** in the sidebar to connect manually.")
-else:
-    # Router to your screens
-    if nav == "Databook": 
-        screen_databook()
-    elif nav == "Search": 
-        screen_extraction()
-    elif nav == "Locker": 
-        screen_locker()
-    elif nav == "Analysis": 
-        screen_analysis()
+if __name__ == "__main__":
+    main()
