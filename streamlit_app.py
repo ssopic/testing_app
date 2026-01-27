@@ -1419,11 +1419,44 @@ def inject_custom_css():
                 margin-top: 0.5em !important;
                 margin-bottom: 0.5em !important;
             }
+
+            /* 6. DROPDOWN & EXPANDER FIXES */
+            /* Force Expander (Details/Summary) Background to Dark */
+            .streamlit-expanderHeader {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+                border: 1px solid #41444C;
+            }
+            
+            /* Fix for Selectbox Dropdown Menu (The popping list) */
+            div[data-baseweb="popover"] {
+                background-color: #1F2129 !important;
+            }
+            
+            div[data-baseweb="menu"] {
+                background-color: #1F2129 !important;
+            }
+            
+            /* Ensure options in the dropdown are white */
+            div[data-baseweb="menu"] li {
+                color: #FFFFFF !important;
+            }
+            
+            /* Highlight hover state in dropdowns */
+            div[data-baseweb="menu"] li:hover {
+                background-color: #41444C !important;
+            }
+            
+            /* Fix for the Selectbox container itself when active */
+            div[data-baseweb="select"] > div {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+                border-color: #41444C !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
     )
-
 def set_page(page_name):
     """Helper to update the current page in session state."""
     st.session_state.current_page = page_name
