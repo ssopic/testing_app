@@ -42,54 +42,43 @@ def get_config(key, default=""):
     return os.environ.get(key, default)
     
 def init_app():
-    """
-    Runs once on app startup. 
-    Handles Session ID, Auto-login, and Wingman State Defaults.
-    """
-    # 1. Session ID
     if "app_session_id" not in st.session_state:
         st.session_state["app_session_id"] = str(uuid.uuid4())
 
-    # 2. Wingman Defaults (Parking Spots)
-    defaults = {
-        "current_view": "databook",       
-        "locker_items": [],               
-        "selected_node": None,            
-        "driver": None,                   
-        "mistral_api_key": "",            
-        "selected_for_analysis": []       
-    }
-    
-    # Safety Check: Don't overwrite existing connections
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    # Initialize Main State Structure
+    if "app_state" not in st.session_state:
+        st.session_state["app_state"] = {
+            "neo4j_creds": {},
+            "mistral_key": "",
+            "inventory": {} 
+        }
 
-    # 3. Connection Logic
-    if st.session_state.get("has_tried_login", False):
-        return
+    # Initialize Wingman Navigation State
+    if "current_view" not in st.session_state:
+        st.session_state["current_view"] = "databook"
+    if "locker_items" not in st.session_state:
+        st.session_state["locker_items"] = []
 
-    # A. Fetch defaults from Secrets
-    m_key = get_config("MISTRAL_API_KEY")
-    n_uri = get_config("NEO4J_URI")
-    n_user = get_config("NEO4J_USER", "neo4j")
-    n_pass = get_config("NEO4J_PASSWORD")
-    
-    # B. SMART SYNC (The Override Logic)
-    # If the user has NOT typed a custom key yet (session state is empty),
-    # use the secret. If they HAVE typed one, preserve it.
-    if m_key and not st.session_state["mistral_api_key"]:
-        st.session_state["mistral_api_key"] = m_key
+    # Credential Loading (Secrets -> App State)
+    if not st.session_state.app_state["mistral_key"]:
+        st.session_state.app_state["mistral_key"] = get_config("MISTRAL_API_KEY")
 
-    # C. Auto-Connect using the ACTIVE key (User's or Secret's)
-    active_key = st.session_state["mistral_api_key"]
-    
-    if n_uri and n_pass and active_key:
-        success, msg = attempt_connection(n_uri, n_user, n_pass, active_key)
-        if not success:
-            st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
-    
-    st.session_state.has_tried_login = True
+    if not st.session_state.app_state["neo4j_creds"]:
+        uri = get_config("NEO4J_URI")
+        user = get_config("NEO4J_USER", "neo4j")
+        password = get_config("NEO4J_PASSWORD")
+        if uri and password:
+            st.session_state.app_state["neo4j_creds"] = {
+                "uri": uri, 
+                "auth": (user, password),
+                "user": user,
+                "pass": password
+            }
+
+    # Run Inventory Fetch if credentials exist but inventory is empty
+    if st.session_state.app_state["neo4j_creds"] and not st.session_state.app_state["inventory"]:
+        st.session_state.app_state["inventory"] = fetch_inventory_from_db()
+
 
 # ==========================================
 ### CSS ###
@@ -1357,17 +1346,14 @@ def screen_analysis():
 
 # --- MAIN NAVIGATION AND INITIALIZATION  ---
 def main():
-    # 1. Page Setup (MUST be first)
     st.set_page_config(layout="wide", page_title="Graph Analyst")
     
-    # 2. Run Initialization
     init_app() 
     inject_custom_css()
     
-    # 3. Define the Grid Layout
     col_left, col_center, col_right = st.columns([1, 10, 1])
 
-    # === LEFT WING (Input) ===
+    # === LEFT WING ===
     with col_left:
         st.caption("INPUT")
         if st.button("⚙️", help="Settings"):
@@ -1380,7 +1366,7 @@ def main():
             st.session_state["current_view"] = "search"
             st.rerun()
 
-    # === RIGHT WING (Output) ===
+    # === RIGHT WING ===
     with col_right:
         st.caption("OUTPUT")
         count = len(st.session_state.get("locker_items", []))
@@ -1391,24 +1377,18 @@ def main():
             st.session_state["current_view"] = "analysis"
             st.rerun()
 
-    # === CENTER STAGE (Content) ===
+    # === CENTER STAGE ===
     with col_center:
-        # Connection Guard: Force user to connect if no driver
-        if not st.session_state.get("driver"):
-            st.warning("⚠️ Disconnected. Click ⚙️ to connect.")
-            return
-
+        # We don't block the UI if no driver, but screens might show empty states.
         view = st.session_state["current_view"]
         
-        # Routing Logic
         if view == "databook":
             st.header("🧭 Databook Explorer")
-            # We pass the driver to the screen function
-            screen_databook(st.session_state["driver"]) 
+            screen_databook() 
             
         elif view == "search":
             st.header("🔍 Agent Search")
-            screen_extraction(st.session_state["driver"], st.session_state["mistral_api_key"])
+            screen_extraction()
             
         elif view == "locker":
             st.header("🗄️ Evidence Locker")
@@ -1418,9 +1398,9 @@ def main():
             st.header("🔬 Deep Analysis")
             screen_analysis()
 
-# Execution Guard
 if __name__ == "__main__":
     main()
+main()
 
 
 
