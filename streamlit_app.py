@@ -1363,8 +1363,9 @@ def inject_custom_css():
             [data-testid="collapsedControl"] { display: none; }
             
             /* 2. Main Container Padding */
+            /* INCREASED padding-top to 5rem to prevent top cropping */
             .block-container {
-                padding-top: 1rem;
+                padding-top: 5rem;
                 padding-bottom: 2rem;
                 padding-left: 2rem;
                 padding-right: 2rem;
@@ -1377,7 +1378,7 @@ def inject_custom_css():
                 width: 100%;
                 border: 1px solid #e0e0e0;
                 border-radius: 6px;
-                background-color: #f8f9fa; /* Light grey for contrast */
+                background-color: #f0f2f6; /* Standard Streamlit light grey */
                 color: #262730;
                 height: 3.5em; /* Taller for better clickability */
                 font-weight: 500;
