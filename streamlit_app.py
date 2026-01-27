@@ -1410,85 +1410,43 @@ def inject_custom_css():
                 margin-bottom: 0.5em !important;
             }
 
-            /* 6. DROPDOWN & EXPANDER FIXES - NUCLEAR OPTION */
+            /* 6. EXPANDER SPECIFIC STYLING (The "Dropdown" fix) */
             
-            /* Expander Header */
+            /* The Clickable Header Bar */
             .streamlit-expanderHeader {
-                background-color: #FFFFFF !important;
+                background-color: #1F2129 !important; /* Force Dark Grey */
                 color: #FFFFFF !important;
-                border: 1px solid #FFFFFF;
+                border: 1px solid #41444C;
+                border-radius: 4px;
             }
 
-            /* --- SELECTBOX FIXES (Targeting data-testid for reliability) --- */
-            
-            /* The main input container (the box you click) */
-            [data-testid="stSelectbox"] > div > div {
-                background-color: #FFFFFF !important;
-                border-color: #41444C !important;
-                color: #FFFFFF !important;
+            /* Hover state for the Header */
+            .streamlit-expanderHeader:hover {
+                background-color: #31333F !important; /* Slightly lighter on hover */
+                color: #00ADB5 !important; /* Cyan text on hover */
+                border-color: #00ADB5 !important;
             }
 
-            /* The input text itself */
-            [data-testid="stSelectbox"] input {
-                color: #FFFFFF !important;
-            }
-
-            /* SVG Icons (Arrows) */
-            [data-testid="stSelectbox"] svg {
+            /* The SVG Arrow inside the header */
+            .streamlit-expanderHeader svg {
                 fill: #FFFFFF !important;
             }
-
-            /* FOCUS / ACTIVE / EXPANDED STATE 
-               This specifically targets the white flash on click. 
-            */
-            [data-testid="stSelectbox"] > div > div:focus-within,
-            [data-testid="stSelectbox"] > div > div:hover,
-            [data-testid="stSelectbox"] > div > div[aria-expanded="true"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-                border-color: #00ADB5 !important; /* Cyan highlight */
-            }
-
-            /* Fallback: Target BaseWeb components directly with !important wildcard */
-            div[data-baseweb="select"] * {
-                background-color: inherit !important; 
-                color: #FFFFFF !important; 
+            .streamlit-expanderHeader:hover svg {
+                fill: #00ADB5 !important;
             }
             
-            /* BUT reset background for the container to avoid transparency issues */
-            div[data-baseweb="select"] > div {
-                background-color: #FFFFFF !important;
-            }
-
-            /* --- DROPDOWN MENU (The List) --- */
-            div[data-baseweb="popover"] {
-                background-color: #FFFFFF !important;
-                border: 1px solid #41444C !important;
-            }
-
-            div[data-baseweb="menu"] {
-                background-color: #1F2129 !important;
+            /* The Content Box that opens up */
+            .streamlit-expanderContent {
+                background-color: #0E1117 !important; /* Match app background or slightly lighter */
+                color: #FFFFFF !important;
+                border: 1px solid #41444C;
+                border-top: none; /* Looks connected to header */
             }
             
-            /* List Items */
-            li[role="option"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-            }
-
-            /* Hover Item in List */
-            li[role="option"]:hover,
-            li[role="option"][aria-selected="true"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-            }
-            
-            /* Multiselect Tags */
-            span[data-baseweb="tag"] {
-                background-color: #FFFFFF !important;
-                color: #FFFFFF !important;
-            }
-            span[data-baseweb="tag"] span {
+            /* Fix for text inside the expander content */
+            .streamlit-expanderContent p, 
+            .streamlit-expanderContent span,
+            .streamlit-expanderContent div {
                 color: #FFFFFF !important;
             }
         </style>
