@@ -41,7 +41,7 @@ def setup_langsmith():
 
         # 3. FORCE THE EU ENDPOINT
         # Ensure your API Key was actually created in the EU region!
-        os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
+        os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 
 # -------------------------------------------------------------
 
