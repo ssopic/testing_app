@@ -1362,7 +1362,7 @@ def inject_custom_css():
             [data-testid="stSidebar"] { display: none; }
             [data-testid="collapsedControl"] { display: none; }
             
-            /* 2. Main Container Padding */
+            /* 2. Main Container Padding & Crazy Background */
             /* INCREASED padding-top to 5rem to prevent top cropping */
             .block-container {
                 padding-top: 5rem;
@@ -1370,38 +1370,52 @@ def inject_custom_css():
                 padding-left: 2rem;
                 padding-right: 2rem;
                 max_width: 100%;
+                background-color: #2b003b; /* Deep Purple Background for stress test */
+                font-family: 'Courier New', monospace; /* Monospace font */
+                color: #00ff00; /* Neon Green Text */
             }
 
-            /* 3. COCKPIT BUTTON STYLING */
+            /* 3. COCKPIT BUTTON STYLING - EXTREME EDITION */
             /* This targets buttons to give them a 'nav-item' feel */
             div.stButton > button {
                 width: 100%;
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                background-color: #f0f2f6; /* Standard Streamlit light grey */
-                color: #262730;
-                height: 3.5em; /* Taller for better clickability */
-                font-weight: 500;
-                transition: all 0.2s ease;
+                border: 3px dashed #ff00ff; /* Hot Pink Dashed Border */
+                border-radius: 15px;
+                background-color: #000000; /* Black Button Background */
+                color: #ffff00; /* Yellow Text */
+                height: 4em; /* Even Taller */
+                font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; /* The chaos font */
+                font-weight: 900;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                transition: all 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55); /* Bouncy transition */
             }
 
             div.stButton > button:hover {
-                border-color: #ff4b4b; /* Streamlit Red accent on hover */
-                background-color: #ffffff;
-                color: #ff4b4b;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                border-color: #00ff00; /* Neon Green Border */
+                background-color: #ff00ff; /* Hot Pink Background */
+                color: #ffffff; /* White Text */
+                box-shadow: 10px 10px 0px rgba(0,255,0,0.8); /* Hard shadow */
+                transform: scale(1.05) rotate(-2deg); /* Tilt and grow */
             }
             
             /* 4. Center Area Focus */
             /* We can't easily target just the center column, but we can style the headers */
             h1, h2, h3 {
-                font-family: 'Source Sans Pro', sans-serif;
+                font-family: 'Impact', fantasy;
+                color: #ff4b4b;
+                text-shadow: 2px 2px #000000;
             }
             
             hr {
                 margin-top: 1em; 
                 margin-bottom: 1em;
-                border-color: #eee;
+                border: 2px solid #00ff00;
+            }
+            
+            /* Make markdown text readable against dark background */
+            .stMarkdown, .stText {
+                color: #e0e0e0 !important;
             }
         </style>
         """,
