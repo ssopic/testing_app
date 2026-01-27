@@ -30,7 +30,7 @@ if "LANGSMITH_API_KEY" in st.secrets:
     os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
     
     # 2. Set the Project Name
-    os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
+    os.environ["LANGCHAIN_PROJECT"] = "graph_rag_analysis"
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
     # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
