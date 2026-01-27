@@ -1378,26 +1378,26 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
-            /* Default State now uses the lighter 'Hover' Gray for better visibility */
+            /* Darker Gray, Static State */
             div.stButton > button {
                 width: 100%;
-                background-color: #31333F; /* Lighter Grey (Previously Hover Color) */
-                color: #FFFFFF !important; /* Pure White Text ALWAYS */
+                background-color: #1F2129; /* Darker Gray */
+                color: #FFFFFF !important; /* Pure White Text */
                 border: 1px solid #41444C;
                 border-radius: 4px;
                 height: 3.5em;
                 font-family: 'Source Sans Pro', sans-serif;
                 font-weight: 700 !important; /* Force Bold */
                 letter-spacing: 0.5px;
-                transition: all 0.2s ease-in-out;
+                transition: none; /* Remove animation for static feel */
             }
 
-            /* Hover State - Subtle shift */
+            /* Hover State - No Color Change, No Glow */
             div.stButton > button:hover {
-                background-color: #41444C; /* Even lighter on hover */
-                border-color: #FFFFFF; /* White Border */
+                background-color: #1F2129; /* Keep same as default */
+                border-color: #41444C;     /* Keep same as default */
                 color: #FFFFFF !important; 
-                box-shadow: 0 0 8px rgba(255, 255, 255, 0.3); /* White Glow */
+                box-shadow: none;          /* Remove glow */
             }
             
             /* 4. GLOBAL TEXT STYLING */
@@ -1460,10 +1460,10 @@ def main():
         st.markdown("### 📥 Input") 
         
         # Navigation Buttons (Using callbacks for single-click nav)
-        st.button("📖 Data", help="Upload and manage data", use_container_width=True, 
+        st.button("📖 Data",  use_container_width=True, 
                   on_click=set_page, args=("Databook",))
             
-        st.button("🔍 Search", help="Extract information", use_container_width=True,
+        st.button("🔍 Search", use_container_width=True,
                   on_click=set_page, args=("Search",))
 
         # Vertical Spacer to push Config to bottom
@@ -1472,7 +1472,7 @@ def main():
         st.divider()
         
         # Settings at bottom
-        if st.button("⚙️ Config", help="System Settings", use_container_width=True):
+        if st.button("⚙️ Config", use_container_width=True):
             show_settings_dialog()
 
     # --- CENTER COLUMN (Main Router) ---
@@ -1500,10 +1500,10 @@ def main():
         locker_count = len(st.session_state.app_state["evidence_locker"])
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        st.button(f"🗄️ Locker{badge}", help="View Evidence Locker", use_container_width=True,
+        st.button(f"🗄️ Locker{badge}",  use_container_width=True,
                   on_click=set_page, args=("Locker",))
             
-        st.button("📈 Analysis", help="Go to Analysis", use_container_width=True,
+        st.button("📈 Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
             
         # Vertical Spacer to push Logout to bottom
