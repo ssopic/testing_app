@@ -1343,27 +1343,11 @@ def screen_analysis():
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
             st.info(resp.content)
 
-# --- CSS ---
-# 1. CSS Injection
-def inject_custom_css():
-    st.markdown("""
-    <style>
-        [data-testid="stSidebar"] { display: none; }
-        header { visibility: hidden; }
-        [data-testid="column"]:nth-of-type(1), [data-testid="column"]:nth-of-type(3) {
-            background-color: #0f1116; 
-            border: 1px solid #1f2937; 
-            padding: 1rem; 
-            border-radius: 8px;
-        }
-        .stButton button { width: 100%; height: 3rem; font-weight: bold; border-radius: 8px; }
-    </style>
-    """, unsafe_allow_html=True)
+
 # --- MAIN NAVIGATION ---
 
 # 1. Try to initialize (Auto-connect on startup)
 init_app()
-inject_custom_css()
 
 # 2. Sidebar Navigation
 with st.sidebar:
