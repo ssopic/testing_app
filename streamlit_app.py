@@ -1414,7 +1414,7 @@ def inject_custom_css():
             
             /* Expander Header */
             .streamlit-expanderHeader {
-                background-color: #1F2129 !important;
+                background-color: #FFFFFF !important;
                 color: #FFFFFF !important;
                 border: 1px solid #41444C;
             }
