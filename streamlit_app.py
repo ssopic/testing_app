@@ -20,49 +20,101 @@ from langsmith.run_helpers import get_current_run_tree
 import plotly.express as px
 import urllib.parse
 
-
-# --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
-# This block must sit here, at the global level, right after imports.
-# It ensures the library picks up the config before the @traceable decorators run.
-
+# ==========================================
+# PHASE 0: CRITICAL ENVIRONMENT SETUP
+# ==========================================
 if "LANGSMITH_API_KEY" in st.secrets:
-    # 1. Set the API Key
     os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
-    
-    # 2. Set the Project Name
     os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
-
-    # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
-    # The error logs showed the app was defaulting to US. This forces EU.
     os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
 
-# -------------------------------------------------------------
+# ==========================================
+# PHASE 1: INITIALIZATION & STATE MANAGEMENT
+# ==========================================
 
+def get_config(key, default=""):
+    """
+    Helper to READ credentials from Secrets (Cloud) or Env (Local).
+    """
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, default)
+    
 def init_app():
     """
     Runs once on app startup. 
-    Now simplified because LangSmith setup is handled globally above.
+    Handles Session ID, Auto-login, and Wingman State Defaults.
     """
-    # Initialize Session ID
+    # 1. Session ID
     if "app_session_id" not in st.session_state:
         st.session_state["app_session_id"] = str(uuid.uuid4())
 
+    # 2. Wingman Defaults (Parking Spots)
+    defaults = {
+        "current_view": "databook",       
+        "locker_items": [],               
+        "selected_node": None,            
+        "driver": None,                   
+        "mistral_api_key": "",            
+        "selected_for_analysis": []       
+    }
+    
+    # Safety Check: Don't overwrite existing connections
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    # 3. Connection Logic
     if st.session_state.get("has_tried_login", False):
         return
 
-    # Existing credential logic...
+    # A. Fetch defaults from Secrets
     m_key = get_config("MISTRAL_API_KEY")
     n_uri = get_config("NEO4J_URI")
     n_user = get_config("NEO4J_USER", "neo4j")
     n_pass = get_config("NEO4J_PASSWORD")
+    
+    # B. SMART SYNC (The Override Logic)
+    # If the user has NOT typed a custom key yet (session state is empty),
+    # use the secret. If they HAVE typed one, preserve it.
+    if m_key and not st.session_state["mistral_api_key"]:
+        st.session_state["mistral_api_key"] = m_key
 
-    if n_uri and n_pass and m_key:
-        success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
+    # C. Auto-Connect using the ACTIVE key (User's or Secret's)
+    active_key = st.session_state["mistral_api_key"]
+    
+    if n_uri and n_pass and active_key:
+        success, msg = attempt_connection(n_uri, n_user, n_pass, active_key)
         if not success:
             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
     
     st.session_state.has_tried_login = True
+
+# ==========================================
+### CSS ###
+# ==========================================
+
+def inject_custom_css():
+    st.markdown("""
+    <style>
+        [data-testid="stSidebar"] { display: none; }
+        header { visibility: hidden; }
+        [data-testid="column"]:nth-of-type(1), [data-testid="column"]:nth-of-type(3) {
+            background-color: #0f1116; 
+            border: 1px solid #1f2937; 
+            padding: 1rem; 
+            border-radius: 8px;
+        }
+        .stButton button {
+            width: 100%;
+            height: 3rem;
+            font-weight: bold;
+            border-radius: 8px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
 # ==========================================
 ### NEW DATABOOK ###
 # ==========================================
@@ -616,8 +668,6 @@ def screen_databook():
 # 0. NON UPDATED PARTS
 # ==========================================
 
-# --- APP CONFIGURATION ---
-st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
 
 # --- CONSTANTS & CONFIG ---
 LLM_MODEL = "mistral-medium"
@@ -1039,11 +1089,6 @@ if "app_state" not in st.session_state:
 # AUTHENTICATION & SETTINGS LOGIC
 # ==========================================
 
-def get_config(key, default=""):
-    """Helper to get credentials from Secrets (Cloud) or Env (Local)."""
-    if key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, default)
 
 def attempt_connection(uri, username, password, api_key):
     """
@@ -1124,39 +1169,6 @@ def show_settings_dialog():
             else:
                 st.error(msg)
 
-#old version. probabbly going to delete
-# def init_app():
-#     """
-#     Runs once on app startup to try auto-login using Secrets/Env Vars.
-#     """
-#     if st.session_state.get("has_tried_login", False):
-#         return
-
-#     # 1. NEW: Setup LangSmith 
-#     # This MUST happen here so the library finds the key when the pipeline runs later
-#     ls_key = get_config("LANGCHAIN_API_KEY") 
-#     if ls_key:
-#         os.environ["LANGCHAIN_API_KEY"] = ls_key
-#         os.environ["LANGCHAIN_TRACING_V2"] = "true"
-#         os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
-#         os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
-#     if "app_session_id" not in st.session_state:
-#         st.session_state["app_session_id"] = str(uuid.uuid4())
-
-#     # 2. Get DATABASE and mistral keys
-#     m_key = get_config("MISTRAL_API_KEY")
-#     n_uri = get_config("NEO4J_URI")
-#     n_user = get_config("NEO4J_USER", "neo4j")
-#     n_pass = get_config("NEO4J_PASSWORD")
-
-#     # Only attempt if we actually have credentials
-#     if n_uri and n_pass and m_key:
-#         success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
-#         if not success:
-#             # Pop-up toast notification of failure (non-intrusive)
-#             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
-    
-#     st.session_state.has_tried_login = True
 # FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
@@ -1343,46 +1355,116 @@ def screen_analysis():
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
             st.info(resp.content)
 
-# --- MAIN NAVIGATION ---
+# --- MAIN NAVIGATION AND INITIALIZATION  ---
+def main():
+    # 1. Page Setup (MUST be first)
+    st.set_page_config(layout="wide", page_title="Graph Analyst")
+    
+    # 2. Run Initialization
+    init_app() 
+    inject_custom_css()
+    
+    # 3. Define the Grid Layout
+    col_left, col_center, col_right = st.columns([1, 10, 1])
 
-# 1. Try to initialize (Auto-connect on startup)
-init_app()
-
-# 2. Sidebar Navigation
-with st.sidebar:
-    st.header("Graph Analyst")
-    
-    # Navigation Options
-    nav_options = ["Databook", "Search", "Locker", "Analysis"]
-    nav = st.radio("Navigation", nav_options)
-    
-    st.divider()
-    
-    # NEW: Settings Button (Opens the pop-up dialog)
-    if st.button("⚙️ Settings"):
-        show_settings_dialog()
-    
-    # NEW: Connection Status & Logout
-    if st.session_state.app_state["connected"]:
-        st.caption("🟢 Connected")
-        if st.button("Logout"):
-            st.session_state.app_state["connected"] = False
-            st.session_state.has_tried_login = False # Reset so it doesn't auto-login immediately
+    # === LEFT WING (Input) ===
+    with col_left:
+        st.caption("INPUT")
+        if st.button("⚙️", help="Settings"):
+            settings_modal()
+        st.divider()
+        if st.button("🧭\nData", use_container_width=True):
+            st.session_state["current_view"] = "databook"
             st.rerun()
-    else:
-        st.caption("🔴 Disconnected")
+        if st.button("🔍\nSrch", use_container_width=True):
+            st.session_state["current_view"] = "search"
+            st.rerun()
 
-# 3. Main Content Router
-if not st.session_state.app_state["connected"]:
-    # Landing message instead of the old 'screen_connection()'
-    st.info("👋 Welcome! The app is disconnected.\n\nIf you set up your Secrets correctly, this should not appear.\n\nOtherwise, click **⚙️ Settings** in the sidebar to connect manually.")
-else:
-    # Router to your screens
-    if nav == "Databook": 
-        screen_databook()
-    elif nav == "Search": 
-        screen_extraction()
-    elif nav == "Locker": 
-        screen_locker()
-    elif nav == "Analysis": 
-        screen_analysis()
+    # === RIGHT WING (Output) ===
+    with col_right:
+        st.caption("OUTPUT")
+        count = len(st.session_state.get("locker_items", []))
+        if st.button(f"🗄️\n({count})", use_container_width=True):
+            st.session_state["current_view"] = "locker"
+            st.rerun()
+        if st.button("🔬\nAnlys", use_container_width=True):
+            st.session_state["current_view"] = "analysis"
+            st.rerun()
+
+    # === CENTER STAGE (Content) ===
+    with col_center:
+        # Connection Guard: Force user to connect if no driver
+        if not st.session_state.get("driver"):
+            st.warning("⚠️ Disconnected. Click ⚙️ to connect.")
+            return
+
+        view = st.session_state["current_view"]
+        
+        # Routing Logic
+        if view == "databook":
+            st.header("🧭 Databook Explorer")
+            # We pass the driver to the screen function
+            screen_databook(st.session_state["driver"]) 
+            
+        elif view == "search":
+            st.header("🔍 Agent Search")
+            screen_extraction(st.session_state["driver"], st.session_state["mistral_api_key"])
+            
+        elif view == "locker":
+            st.header("🗄️ Evidence Locker")
+            screen_locker()
+            
+        elif view == "analysis":
+            st.header("🔬 Deep Analysis")
+            screen_analysis()
+
+# Execution Guard
+if __name__ == "__main__":
+    main()
+
+
+
+# OLD VARIANT, DELETE AFTER TESTS
+# st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
+
+# # 1. Try to initialize (Auto-connect on startup)
+# init_app()
+
+# # 2. Sidebar Navigation
+# with st.sidebar:
+#     st.header("Graph Analyst")
+    
+#     # Navigation Options
+#     nav_options = ["Databook", "Search", "Locker", "Analysis"]
+#     nav = st.radio("Navigation", nav_options)
+    
+#     st.divider()
+    
+#     # NEW: Settings Button (Opens the pop-up dialog)
+#     if st.button("⚙️ Settings"):
+#         show_settings_dialog()
+    
+#     # NEW: Connection Status & Logout
+#     if st.session_state.app_state["connected"]:
+#         st.caption("🟢 Connected")
+#         if st.button("Logout"):
+#             st.session_state.app_state["connected"] = False
+#             st.session_state.has_tried_login = False # Reset so it doesn't auto-login immediately
+#             st.rerun()
+#     else:
+#         st.caption("🔴 Disconnected")
+
+# # 3. Main Content Router
+# if not st.session_state.app_state["connected"]:
+#     # Landing message instead of the old 'screen_connection()'
+#     st.info("👋 Welcome! The app is disconnected.\n\nIf you set up your Secrets correctly, this should not appear.\n\nOtherwise, click **⚙️ Settings** in the sidebar to connect manually.")
+# else:
+#     # Router to your screens
+#     if nav == "Databook": 
+#         screen_databook()
+#     elif nav == "Search": 
+#         screen_extraction()
+#     elif nav == "Locker": 
+#         screen_locker()
+#     elif nav == "Analysis": 
+#         screen_analysis()
