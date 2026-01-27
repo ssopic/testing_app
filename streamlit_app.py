@@ -1430,11 +1430,10 @@ def set_page(page_name):
 def main():
     # 1. Setup & Styling
     st.set_page_config(layout="wide", page_title="Graph Analyst")
-
+    
     # Initialize LangSmith env vars immediately
     setup_langsmith()
-
-    # setup css
+    
     inject_custom_css()
     
     # Initialize app (secrets, state)
@@ -1446,73 +1445,69 @@ def main():
 
     # 2. Connection Gatekeeper
     if not st.session_state.app_state["connected"]:
-        # Disconnected View
-        st.info("👋 Welcome! The app is disconnected.\n\n"
-                "If you set up your Secrets correctly, this should not appear.\n\n"
-                "Otherwise, click **⚙️ Settings** below to connect manually.")
-        
-        # Simple disconnected layout
+        st.info("👋 Welcome! The app is disconnected. Please connect below.")
         if st.button("⚙️ Settings"):
             show_settings_dialog()
         return
 
     # 3. Cockpit Layout (3 Columns)
-    # Ratios: [Left Nav: 1] - [Main Content: 10] - [Right Nav: 1]
-    # You can adjust these ratios (e.g., [1, 8, 1]) if the sidebars feel too narrow.
-    c_left, c_main, c_right = st.columns([1, 10, 1])
+    # Ratios: [1.2, 8, 1.2]
+    c_left, c_main, c_right = st.columns([1.2, 8, 1.2], gap="medium")
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        st.write("### 📥") # Icon header or similar
+        st.markdown("### 📥 Input") 
         
-        # Navigation Buttons
-        if st.button("📖 Data", help="Go to Databook", use_container_width=True):
-            set_page("Databook")
+        # Navigation Buttons (Using callbacks for single-click nav)
+        st.button("📖 Data", help="Upload and manage data", use_container_width=True, 
+                  on_click=set_page, args=("Databook",))
             
-        if st.button("🔍 Search", help="Go to Extraction", use_container_width=True):
-            set_page("Search")
+        st.button("🔍 Search", help="Extract information", use_container_width=True,
+                  on_click=set_page, args=("Search",))
 
-        # Vertical Spacer to push settings to bottom
-        # Streamlit doesn't have a native "push to bottom", so we use empty lines or a container hack.
-        st.write("") 
-        st.write("")
-        st.write("")
+        # Vertical Spacer to push Config to bottom
+        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
         
         st.divider()
         
-        if st.button("⚙️ Config", help="Settings", use_container_width=True):
+        # Settings at bottom
+        if st.button("⚙️ Config", help="System Settings", use_container_width=True):
             show_settings_dialog()
 
     # --- CENTER COLUMN (Main Router) ---
     with c_main:
-        # Router Logic
-        current = st.session_state.current_page
-        
-        if current == "Databook":
-            screen_databook()
-        elif current == "Search":
-            screen_extraction()
-        elif current == "Locker":
-            screen_locker()
-        elif current == "Analysis":
-            screen_analysis()
-        else:
-            st.error(f"Unknown page: {current}")
+        with st.container():
+            # Router Logic
+            current = st.session_state.current_page
+            
+            if current == "Databook":
+                screen_databook()
+            elif current == "Search":
+                screen_extraction()
+            elif current == "Locker":
+                screen_locker()
+            elif current == "Analysis":
+                screen_analysis()
+            else:
+                st.error(f"Unknown page: {current}")
 
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
-        st.write("### 📤")
+        st.markdown("### 📤 Output")
         
         # Locker Badge Calculation
         locker_count = len(st.session_state.app_state["evidence_locker"])
-        locker_label = f"🗄️ Locker ({locker_count})"
+        badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        if st.button(locker_label, help="View Evidence Locker", use_container_width=True):
-            set_page("Locker")
+        st.button(f"🗄️ Locker{badge}", help="View Evidence Locker", use_container_width=True,
+                  on_click=set_page, args=("Locker",))
             
-        if st.button("📈 Analysis", help="Go to Analysis", use_container_width=True):
-            set_page("Analysis")
+        st.button("📈 Analysis", help="Go to Analysis", use_container_width=True,
+                  on_click=set_page, args=("Analysis",))
             
+        # Vertical Spacer to push Logout to bottom
+        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
+
         st.divider()
         
         # Logout
