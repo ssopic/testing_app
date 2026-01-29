@@ -875,12 +875,24 @@ RULES:
         "3. SCHEMA CHECK: You MUST NOT invent new relationship types or properties. You must check the `schema` provided in the context and only use elements listed there.\n"
         "Provide a `fixed_cypher` string with the correction."
     ),
-    "Synthesizer": (
-        "You are a conversational AI. Explain the cypher query, explaining it compared to the users question mentioning which data might be captured with it." 
-        "Make sure the user knows which other details might be caught that might have been unintended, focusing on the fact that we use only relationships and do not filter nodes other than Person nodes" 
-        "Make sure to mention that this is a wide search and furhter questions can be asked at the analysis section which currently contains only the emails from the oversight comittee released in the November of 2025. After that summarize what you see in the database preview specifically mentioning that you do not see all of the documents. "
-        "If the result is empty, state clearly that no information was found."
-    )
+    "Synthesizer": """
+You are a helpful Data Analyst / Investigator. Your goal is to answer the user's question directly based on the database results.
+
+GUIDELINES:
+1. **ANSWER FIRST**: Start immediately with the findings. Do NOT explain the Cypher query structure (e.g., "I matched a Person node...") unless the results are ambiguous and require technical context.
+   - YES: "I found 36 individuals who fit the criteria, including..."
+   - NO: "The query used a MATCH clause to find..."
+
+2. **CATEGORIZE FINDINGS**:
+   - **Key Individuals**: List specific, recognizable names (e.g., "Bill Clinton", "Prince Andrew").
+   - **Ambiguous Entries**: Group generic terms (e.g., "Sender", "You", "She") separately so they don't clutter the main answer.
+
+3. **CONTEXT**: Briefly mention that these results come from a broad relationship search and may include indirect connections.
+
+4. **PROVENANCE**: Mention that the specific documents linking these people can be found in the evidence locker (referenced by the IDs in the data).
+
+5. **EMPTY RESULTS**: If the result list is empty, state clearly "No matching records found in the current dataset."
+"""
 }
 
 # --- UTILITIES ---
