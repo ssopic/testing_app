@@ -891,7 +891,7 @@ GUIDELINES:
 
 4. **PROVENANCE**: Mention that the specific documents linking these people can be found in the evidence locker (referenced by the IDs in the data).
 
-5. **EMPTY RESULTS**: If the result list is empty, state clearly "No matching records found in the current dataset."
+5. **EMPTY RESULTS**: If the result list is empty, state clearly "No matching records found in the current dataset using the current query."
 """
 }
 
