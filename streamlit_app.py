@@ -726,7 +726,7 @@ class CypherWrapper(BaseModel):
 # --- SYSTEM PROMPTS (Preserved) ---
 
 SYSTEM_PROMPTS = {
-    "Intent Planner": """
+  "Intent Planner": """
 You are a Cypher query planning expert. Analyze the user's natural language query.
 The user will almost always input their question in English but if the question is in another language, you must translate the users question to English prior to continuing with the following steps:
 
@@ -746,7 +746,7 @@ VERB FILTERS: If the user specifically asks for exact phrases (e.g., 'relationsh
 EXAMPLES:
 
 Input: "Who paid John Doe?"
-Output: {
+Output: {{
   "intent": "FindEntity",
   "target_entity_nl": "John Doe",
   "source_entity_nl": "Who",
@@ -754,10 +754,10 @@ Output: {
   "proposed_relationships": ["paid"],
   "filter_on_verbs": [],
   "constraints": []
-}
+}}
 
 Input: "How is 'Project Omega' connected to the 'Oversight Committee'?"
-Output: {
+Output: {{
   "intent": "MultiHopAnalysis",
   "target_entity_nl": "Oversight Committee",
   "source_entity_nl": "Project Omega",
@@ -765,10 +765,10 @@ Output: {
   "proposed_relationships": ["connected"],
   "filter_on_verbs": [],
   "constraints": []
-}
+}}
 
 Input: "Show me all interactions where the verb is explicitly 'bribed'."
-Output: {
+Output: {{
   "intent": "FindPath",
   "target_entity_nl": "all",
   "source_entity_nl": "all",
@@ -776,10 +776,10 @@ Output: {
   "proposed_relationships": ["bribed"],
   "filter_on_verbs": ["bribed"],
   "constraints": []
-}
+}}
 
 Input: "How much did Mary give Johnny where that Johnny does not have a surname Smith?"
-Output: {
+Output: {{
   "intent": "Aggregation",
   "target_entity_nl": "Johnny",
   "source_entity_nl": "Mary",
@@ -787,8 +787,9 @@ Output: {
   "proposed_relationships": ["give"],
   "filter_on_verbs": [],
   "constraints": ["Johnny surname IS NOT 'Smith'"]
-}
+}}
 """,
+
     "Schema Selector": """
 You are a Schema Context manager. Your goal is to select the relevant graph schema elements for the user's query and CREATE A MAP for the downstream agents.
 
@@ -801,14 +802,14 @@ TASK:
 2. MAPPING (CRITICAL): You must explicity map the User's terminology to the Schema's terminology.
    - `verb_mapping`: Map each verb in `proposed_relationships` to the Schema Relationship Type.
      * STRICT RULE: The value MUST be the EXACT string from the schema (e.g., "FINANCIAL_TRANSACTION", not "Financial Transaction").
-     * Example: `{"paid": "FINANCIAL_TRANSACTION", "visited": "TRAVEL_EVENT"}`
+     * Example: `{{"paid": "FINANCIAL_TRANSACTION", "visited": "TRAVEL_EVENT"}}`
    - `entity_mapping`: Map entities/constraints to the Schema Node Label.
-     * Example: `{"island": "LOCATION", "company": "ORGANIZATION"}`
+     * Example: `{{"island": "LOCATION", "company": "ORGANIZATION"}}`
 
 3. Populate 'NodeProperties' and 'RelationshipProperties' with the valid keys for the selected types.
 """,
 
-        "Grounding Agent": """
+    "Grounding Agent": """
 You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.
 
 INPUTS:
