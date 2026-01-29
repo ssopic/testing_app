@@ -670,7 +670,7 @@ class StructuredBlueprint(BaseModel):
     target_entity_nl: str = Field(description="Natural language term for the primary entity.")
     source_entity_nl: str = Field(description="Natural language term for the starting entity or context.")
     complexity: str = Field(description="Simple, MultiHop, or Aggregation.")
-    proposed_relationships: List[str] = Field(default_factory=list, description="List of sequential relationships or verbs.")
+    proposed_relationships: List[str] = Field(default_factory=list, description="List of sequential relationships or verbs. EXTRACT VERBATIM. Do not normalize. If user says 'bribed', output 'bribed'.")
     filter_on_verbs: List[str] = Field(default_factory=list, description="Specific raw verbs to filter by.")
     constraints: List[str] = Field(description="Temporal or attribute constraints.")
     properties_to_return: List[str] = Field(description="Properties the user wants to see.")
@@ -706,6 +706,15 @@ class PrunedSchema(BaseModel):
     RelationshipTypes: List[str]
     NodeProperties: Dict[str, List[str]]
     RelationshipProperties: Dict[str, List[str]]
+    # NEW: Friction Reducers for when the user specifically asks for verbs and labels.
+    verb_mapping: Dict[str, str] = Field(
+        default_factory=dict, 
+        description="Map from Blueprint Verb (key) to Schema Relationship Type (value). Example: {'paid': 'FINANCIAL_TRANSACTION'}"
+    )
+    entity_mapping: Dict[str, str] = Field(
+        default_factory=dict, 
+        description="Map from Blueprint Keyword (key) to Schema Node Label (value). Example: {'island': 'LOCATION'}"
+    )
 
 class SynthesisOutput(BaseModel):
     final_answer: str
@@ -717,39 +726,123 @@ class CypherWrapper(BaseModel):
 # --- SYSTEM PROMPTS (Preserved) ---
 
 SYSTEM_PROMPTS = {
-    "Intent Planner": (
-        "You are a Cypher query planning expert. Analyze the user's natural language query. "
-        "The user will almost always input their question in English but if the question is in another language, you must translate the users question to English prior to continuing with the following steps:"
-        "Determine if this is a simple lookup or a 'MultiHop' query.\n"
-        "RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list. "
-        "Example: 'Who paid Epstein and visited?' -> ['paid', 'visited'].\n"
-        "VERB FILTERS: If the user specifically asks for exact phrases (e.g., 'relationships with the verb \"stocks of\"'), "
-        "extract those exact strings into 'filter_on_verbs'."),
-    "Schema Selector": (
-        "You are a Schema Context manager. Your goal is to select the relevant graph schema elements for the user's query.\n"
-        "INPUTS:\n"
-        "1. BLUEPRINT: The user's intent and proposed relationships.\n"
-        "2. FULL_SCHEMA: The actual Node Labels, Relationship Types, AND their Properties.\n"
-        "TASK:\n"
-        "Select ONLY the Node Labels and Relationship Types relevant to the blueprint. "
-        "Crucially, populate 'NodeProperties' and 'RelationshipProperties' with the valid keys for the selected types.\n"
-        "CRITICAL RULES:\n"
-        "1. MAPPING: You MUST map the user's natural language verbs (e.g. 'paid') to the closest semantic equivalent in the FULL_SCHEMA (e.g. 'FINANCIAL_TRANSACTION'). Do NOT return empty lists if a plausible match exists.\n"
-        "2. EXACT RETURN: Once you identify the match, return the string EXACTLY as it appears in FULL_SCHEMA.\n"
-        "3. PROPERTY AWARENESS: Pass the valid property lists. This prevents the generator from inventing properties like '.type' or '.status' if they don't exist."
-    ),
-    "Grounding Agent": (
-        "You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.\n"
-        "CHAIN OF THOUGHT (Required):\n"
-        "1. Analyze Entities: Is 'Island' a PERSON or a LOCATION? Check the Schema labels.\n"
-        "2. If you are sure the Node is a PERSON feel free to use the .name property. If the node has any other label(ie. ORGANIZATION, ISLAND ), do not use any filters on it. \n"
-        "3. Define Path: If the destination is a Location, ensure both the right relationship type is being used and that there are no labels in the pattern (e.g., `(p)-[:MOVED]->(l:)`).\n\n"
-        "TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.\n"
-        "MULTI-HOP: The 'proposed_relationships' list (e.g., ['paid', 'visited']) must be mapped to the valid schema types provided in the SCHEMA list.\n"
-        "PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results. .\n"
-        "PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'document'.\n"        
-        "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
-    ),
+    "Intent Planner": """
+You are a Cypher query planning expert. Analyze the user's natural language query.
+The user will almost always input their question in English but if the question is in another language, you must translate the users question to English prior to continuing with the following steps:
+
+TASK:
+1. Extract entities and relationships.
+2. CRITICAL - VERB EXTRACTION: You must extract the verbs EXACTLY as the user spoke them. Do NOT normalize them into categories.
+   - Example: If user says 'Who visited and paid?', output ['visited', 'paid'], NOT ['travel_event', 'financial_transaction'].
+
+3. Determine the 'complexity' using this strict taxonomy:
+   - 'Simple': Direct attribute lookups or single-hop neighbors (e.g., "Find John", "Who paid John?").
+   - 'MultiHop': Queries requiring traversal of 2+ edges or finding paths between entities (e.g., "How is John connected to Mary?", "Friends of friends").
+   - 'Aggregation': Questions asking for counts, maximums, minimums, or averages (e.g., "How many...", "Who has the most...").
+
+RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list.
+VERB FILTERS: If the user specifically asks for exact phrases (e.g., 'relationships with the verb "stocks of"'), extract those exact strings into 'filter_on_verbs'.
+
+EXAMPLES:
+
+Input: "Who paid John Doe?"
+Output: {
+  "intent": "FindEntity",
+  "target_entity_nl": "John Doe",
+  "source_entity_nl": "Who",
+  "complexity": "Simple",
+  "proposed_relationships": ["paid"],
+  "filter_on_verbs": [],
+  "constraints": []
+}
+
+Input: "How is 'Project Omega' connected to the 'Oversight Committee'?"
+Output: {
+  "intent": "MultiHopAnalysis",
+  "target_entity_nl": "Oversight Committee",
+  "source_entity_nl": "Project Omega",
+  "complexity": "MultiHop",
+  "proposed_relationships": ["connected"],
+  "filter_on_verbs": [],
+  "constraints": []
+}
+
+Input: "Show me all interactions where the verb is explicitly 'bribed'."
+Output: {
+  "intent": "FindPath",
+  "target_entity_nl": "all",
+  "source_entity_nl": "all",
+  "complexity": "Simple",
+  "proposed_relationships": ["bribed"],
+  "filter_on_verbs": ["bribed"],
+  "constraints": []
+}
+
+Input: "How much did Mary give Johnny where that Johnny does not have a surname Smith?"
+Output: {
+  "intent": "Aggregation",
+  "target_entity_nl": "Johnny",
+  "source_entity_nl": "Mary",
+  "complexity": "Simple",
+  "proposed_relationships": ["give"],
+  "filter_on_verbs": [],
+  "constraints": ["Johnny surname IS NOT 'Smith'"]
+}
+""",
+    "Schema Selector": """
+You are a Schema Context manager. Your goal is to select the relevant graph schema elements for the user's query and CREATE A MAP for the downstream agents.
+
+INPUTS:
+1. BLUEPRINT: The user's intent and proposed relationships.
+2. FULL_SCHEMA: The actual Node Labels, Relationship Types, AND their Properties.
+
+TASK:
+1. Select ONLY the Node Labels and Relationship Types relevant to the blueprint.
+2. MAPPING (CRITICAL): You must explicity map the User's terminology to the Schema's terminology.
+   - `verb_mapping`: Map each verb in `proposed_relationships` to the Schema Relationship Type.
+     * STRICT RULE: The value MUST be the EXACT string from the schema (e.g., "FINANCIAL_TRANSACTION", not "Financial Transaction").
+     * Example: `{"paid": "FINANCIAL_TRANSACTION", "visited": "TRAVEL_EVENT"}`
+   - `entity_mapping`: Map entities/constraints to the Schema Node Label.
+     * Example: `{"island": "LOCATION", "company": "ORGANIZATION"}`
+
+3. Populate 'NodeProperties' and 'RelationshipProperties' with the valid keys for the selected types.
+""",
+
+        "Grounding Agent": """
+You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.
+
+INPUTS:
+- BLUEPRINT: User's original intent.
+- SCHEMA: Pruned schema WITH MAPPING GUIDES (`verb_mapping`, `entity_mapping`).
+
+TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.
+
+RULES:
+1. USE THE MAP: Do not guess. Look at `schema.verb_mapping`.
+   - If the map says "paid" -> "FINANCIAL_TRANSACTION", use "FINANCIAL_TRANSACTION".
+
+2. HANDLING AMBIGUITY (OR Logic): If the user targets multiple types, use pipes `|`.
+   - Example Nodes: `Person|Organization`
+
+3. STRICT ATTRIBUTE FILTERING (CRITICAL):
+   - **TARGET NODES ONLY:** You may ONLY apply name filters to nodes labeled `PERSON`. Do NOT filter `LOCATION`, `ORGANIZATION`, etc. by name (map them to Labels instead).
+   - **FUZZY MATCHING REQUIRED:** When filtering properties, you MUST use `toLower(n.prop) CONTAINS 'value'`.
+     * FORBIDDEN: Do NOT use strict equality (`=`).
+     * BAD: `WHERE n.name = 'John'`
+     * GOOD: `WHERE toLower(n.name) CONTAINS 'john'`
+   - **NEGATIVE CONSTRAINTS:** For "is not X", use `NOT toLower(n.name) CONTAINS 'x'`.
+     * FORBIDDEN: Do NOT use `<>` or `!=`.
+     * BAD: `WHERE n.name <> 'Gates'`
+     * GOOD: `WHERE NOT toLower(n.name) CONTAINS 'gates'`
+   - **LOWERCASE VALUES:** Always convert the target string to lowercase in the query (e.g. `'john'`, not `'John'`).
+
+4. PATH PARSIMONY: Do not add redundant or mirrored relationships.
+   - If the Blueprint asks for 2 steps (e.g., "paid" and "visited"), generate exactly 2 relationships. Do not hallucinate a 3rd step or "double back" unless the logic strictly demands it.
+
+PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results.
+PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'Document'.
+CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties.
+""",
     "Cypher Generator": (
         "You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query. "
         "RULES:\n"
