@@ -1647,6 +1647,54 @@ def inject_custom_css():
                 color: #FFFFFF !important;
                 border-color: #41444C !important;
             }
+
+            /* 9. NOTIFICATIONS & ALERTS (Toasts) */
+            
+            div[data-testid="stToast"] {
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C !important;
+                color: #FFFFFF !important;
+            }
+            
+            /* Ensure text inside toast is white */
+            div[data-testid="stToast"] p, 
+            div[data-testid="stToast"] div {
+                color: #FFFFFF !important;
+            }
+            
+            /* Alerts (st.success, st.info, etc) */
+            div[data-testid="stAlert"] {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+                border: 1px solid #41444C;
+            }
+            div[data-testid="stAlert"] p,
+            div[data-testid="stAlert"] div {
+                color: #FFFFFF !important;
+            }
+
+            /* 10. CODE BLOCKS & TRACES (Fix for Cypher/Trace visibility) */
+            
+            /* The code block container */
+            div[data-testid="stCodeBlock"] {
+                background-color: #0E1117 !important;
+                border: 1px solid #41444C;
+                border-radius: 4px;
+            }
+            
+            /* The code text itself */
+            code {
+                color: #00ADB5 !important; /* Cyan for code/traces */
+                background-color: transparent !important; 
+                font-family: 'Courier New', monospace !important;
+            }
+            
+            /* Preformatted text blocks */
+            pre {
+                background-color: #0E1117 !important;
+                color: #FFFFFF !important;
+                border: 1px solid #41444C;
+            }
         </style>
         """,
         unsafe_allow_html=True
