@@ -380,7 +380,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
         # --- Cascading Filters ---
         edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-        selected_edge_filter = st.multiselect(
+        selected_edge_filter = st.selectbox(
             "Filter by Relationship:",
             ["All"] + edge_options,
             key="filter_edge"
@@ -394,7 +394,7 @@ def render_explorer_workspace(selector_type, selected_items):
             filtered_df_step1 = df[df['edge'] == selected_edge_filter]
             target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
 
-        selected_target_filter = st.multiselect(
+        selected_target_filter = st.selectbox(
             "Filter by Target Type:",
             ["All"] + target_options,
             key="filter_target"
