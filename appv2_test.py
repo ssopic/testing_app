@@ -25,17 +25,23 @@ import urllib.parse
 # This block must sit here, at the global level, right after imports.
 # It ensures the library picks up the config before the @traceable decorators run.
 
-if "LANGSMITH_API_KEY" in st.secrets:
-    # 1. Set the API Key
-    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
-    
-    # 2. Set the Project Name
-    os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+def setup_langsmith():
+    """
+    Sets up LangSmith environment variables.
+    NOTE: For decorators like @traceable to work reliably, these variables 
+    should ideally be set at the very top of your script, before other imports/definitions.
+    """
+    if "LANGSMITH_API_KEY" in st.secrets:
+        # 1. Set the API Key
+        os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+        
+        # 2. Set the Project Name
+        os.environ["LANGCHAIN_PROJECT"] = "graph_rag_analysis"
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
-    # 3. FORCE THE EU ENDPOINT (Set both variables for safety)
-    # The error logs showed the app was defaulting to US. This forces EU.
-    os.environ["LANGCHAIN_ENDPOINT"] = "https://eu.api.smith.langchain.com"
+        # 3. FORCE THE EU ENDPOINT
+        # Ensure your API Key was actually created in the EU region!
+        os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 
 # -------------------------------------------------------------
 
@@ -261,7 +267,7 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
 # 3. FRAGMENT: WORKSPACE
 # ==========================================
 
-@st.fragment
+#@st.fragment
 # ==============================================================================
 # UPDATED BACKEND: VERB SUPPORT
 # ==============================================================================
@@ -664,7 +670,7 @@ class StructuredBlueprint(BaseModel):
     target_entity_nl: str = Field(description="Natural language term for the primary entity.")
     source_entity_nl: str = Field(description="Natural language term for the starting entity or context.")
     complexity: str = Field(description="Simple, MultiHop, or Aggregation.")
-    proposed_relationships: List[str] = Field(default_factory=list, description="List of sequential relationships or verbs.")
+    proposed_relationships: List[str] = Field(default_factory=list, description="List of sequential relationships or verbs. EXTRACT VERBATIM. Do not normalize. If user says 'bribed', output 'bribed'.")
     filter_on_verbs: List[str] = Field(default_factory=list, description="Specific raw verbs to filter by.")
     constraints: List[str] = Field(description="Temporal or attribute constraints.")
     properties_to_return: List[str] = Field(description="Properties the user wants to see.")
@@ -700,6 +706,15 @@ class PrunedSchema(BaseModel):
     RelationshipTypes: List[str]
     NodeProperties: Dict[str, List[str]]
     RelationshipProperties: Dict[str, List[str]]
+    # NEW: Friction Reducers for when the user specifically asks for verbs and labels.
+    verb_mapping: Dict[str, str] = Field(
+        default_factory=dict, 
+        description="Map from Blueprint Verb (key) to Schema Relationship Type (value). Example: {'paid': 'FINANCIAL_TRANSACTION'}"
+    )
+    entity_mapping: Dict[str, str] = Field(
+        default_factory=dict, 
+        description="Map from Blueprint Keyword (key) to Schema Node Label (value). Example: {'island': 'LOCATION'}"
+    )
 
 class SynthesisOutput(BaseModel):
     final_answer: str
@@ -711,56 +726,148 @@ class CypherWrapper(BaseModel):
 # --- SYSTEM PROMPTS (Preserved) ---
 
 SYSTEM_PROMPTS = {
-    "Intent Planner": (
-        "You are a Cypher query planning expert. Analyze the user's natural language query. "
-        "The user will almost always input their question in English but if the question is in another language, you must translate the users question to English prior to continuing with the following steps:"
-        "Determine if this is a simple lookup or a 'MultiHop' query.\n"
-        "RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list. "
-        "Example: 'Who paid Epstein and visited?' -> ['paid', 'visited'].\n"
-        "VERB FILTERS: If the user specifically asks for exact phrases (e.g., 'relationships with the verb \"stocks of\"'), "
-        "extract those exact strings into 'filter_on_verbs'."),
-    "Schema Selector": (
-        "You are a Schema Context manager. Your goal is to select the relevant graph schema elements for the user's query.\n"
-        "INPUTS:\n"
-        "1. BLUEPRINT: The user's intent and proposed relationships.\n"
-        "2. FULL_SCHEMA: The actual Node Labels, Relationship Types, AND their Properties.\n"
-        "TASK:\n"
-        "Select ONLY the Node Labels and Relationship Types relevant to the blueprint. "
-        "Crucially, populate 'NodeProperties' and 'RelationshipProperties' with the valid keys for the selected types.\n"
-        "CRITICAL RULES:\n"
-        "1. MAPPING: You MUST map the user's natural language verbs (e.g. 'paid') to the closest semantic equivalent in the FULL_SCHEMA (e.g. 'FINANCIAL_TRANSACTION'). Do NOT return empty lists if a plausible match exists.\n"
-        "2. EXACT RETURN: Once you identify the match, return the string EXACTLY as it appears in FULL_SCHEMA.\n"
-        "3. PROPERTY AWARENESS: Pass the valid property lists. This prevents the generator from inventing properties like '.type' or '.status' if they don't exist."
-    ),
-    "Grounding Agent": (
-        "You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.\n"
-        "CHAIN OF THOUGHT (Required):\n"
-        "1. Analyze Entities: Is 'Island' a PERSON or a LOCATION? Check the Schema labels.\n"
-        "2. If you are sure the Node is a PERSON feel free to use the .name property. If the node has any other label(ie. ORGANIZATION, ISLAND ), do not use any filters on it. \n"
-        "3. Define Path: If the destination is a Location, ensure both the right relationship type is being used and that there are no labels in the pattern (e.g., `(p)-[:MOVED]->(l:)`).\n\n"
-        "TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.\n"
-        "MULTI-HOP: The 'proposed_relationships' list (e.g., ['paid', 'visited']) must be mapped to the valid schema types provided in the SCHEMA list.\n"
-        "PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results. .\n"
-        "PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'document'.\n"        
-        "CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties."
-    ),
-    "Cypher Generator": (
-        "You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query. "
-        "RULES:\n"
-        "1. PATHS: Iterate through the 'relationship_paths' list to build the pattern. Assign variables to ALL relationships.\n"
-        "   Example 2 steps: (a:LABEL)-[r1:REL_TYPE_1]->(b)-[r2:REL_TYPE_2]->(c:LABEL).\n"
-        "   CRITICAL 1: Do NOT create self-loops like `(b)--(b)`. Ensure the path is continuous: `(a)-[r1]->(b)-[r2]->(c)`.\n"
-        "   CRITICAL 2: All labels are CAPITALIZED.\n"
-        "2. PROPERTIES: Only use properties explicitly listed in the Schema. Do NOT invent properties like `.type`, `.category`, etc.\n"
-        "   **CRITICAL EXCEPTION**: For (n:Person), ONLY use `n.name`. NEVER use `n.id` or `n.entity_id`.\n"
-        "3. FUZZY MATCHING: For names/strings, always use `toLower(n.name) CONTAINS 'Johnny'` over strict equality `=` to handle messy data.\n"
-        "4. VERB FILTERS: If 'filter_on_verbs' is provided, add a WHERE clause to check `raw_verbs` on the relationships.\n"
-        "   Example: `WHERE ANY(v IN r1.raw_verbs WHERE v CONTAINS 'stocks of')`.\n"
-        "5. PROVENANCE: Return provenance from the relationship variables using `coalesce(r.source_pks, r.doc_id)`. "
-        "Do NOT query 'target_pks'. If multi-hop, return a list (e.g. `[coalesce(r1.source_pks, r1.doc_id), ...]`).\n"
-        "6. DISTINCT: Always use `RETURN DISTINCT` to avoid duplicate result rows.\n"
-        "7. Do not include semicolons at the end."
-    ),
+  "Intent Planner": """
+You are a Cypher query planning expert. Analyze the user's natural language query.
+The user will almost always input their question in English but if the question is in another language, you must translate the users question to English prior to continuing with the following steps:
+
+TASK:
+1. Extract entities and relationships.
+2. CRITICAL - VERB EXTRACTION: You must extract the verbs EXACTLY as the user spoke them. Do NOT normalize them into categories.
+   - Example: If user says 'Who visited and paid?', output ['visited', 'paid'], NOT ['travel_event', 'financial_transaction'].
+
+3. Determine the 'complexity' using this strict taxonomy:
+   - 'Simple': Direct attribute lookups or single-hop neighbors (e.g., "Find John", "Who paid John?").
+   - 'MultiHop': Queries requiring traversal of 2+ edges or finding paths between entities (e.g., "How is John connected to Mary?", "Friends of friends").
+   - 'Aggregation': Questions asking for counts, maximums, minimums, or averages (e.g., "How many...", "Who has the most...").
+
+RELATIONSHIPS: Extract the sequence of actions or verbs into 'proposed_relationships' as a list.
+VERB FILTERS: If the user specifically asks for exact phrases (e.g., 'relationships with the verb "stocks of"'), extract those exact strings into 'filter_on_verbs'.
+
+EXAMPLES:
+
+Input: "Who paid John Doe?"
+Output: {{
+  "intent": "FindEntity",
+  "target_entity_nl": "John Doe",
+  "source_entity_nl": "Who",
+  "complexity": "Simple",
+  "proposed_relationships": ["paid"],
+  "filter_on_verbs": [],
+  "constraints": []
+}}
+
+Input: "How is 'Project Omega' connected to the 'Oversight Committee'?"
+Output: {{
+  "intent": "MultiHopAnalysis",
+  "target_entity_nl": "Oversight Committee",
+  "source_entity_nl": "Project Omega",
+  "complexity": "MultiHop",
+  "proposed_relationships": ["connected"],
+  "filter_on_verbs": [],
+  "constraints": []
+}}
+
+Input: "Show me all interactions where the verb is explicitly 'bribed'."
+Output: {{
+  "intent": "FindPath",
+  "target_entity_nl": "all",
+  "source_entity_nl": "all",
+  "complexity": "Simple",
+  "proposed_relationships": ["bribed"],
+  "filter_on_verbs": ["bribed"],
+  "constraints": []
+}}
+
+Input: "How much did Mary give Johnny where that Johnny does not have a surname Smith?"
+Output: {{
+  "intent": "Aggregation",
+  "target_entity_nl": "Johnny",
+  "source_entity_nl": "Mary",
+  "complexity": "Simple",
+  "proposed_relationships": ["give"],
+  "filter_on_verbs": [],
+  "constraints": ["Johnny surname IS NOT 'Smith'"]
+}}
+""",
+
+    "Schema Selector": """
+You are a Schema Context manager. Your goal is to select the relevant graph schema elements for the user's query and CREATE A MAP for the downstream agents.
+
+INPUTS:
+1. BLUEPRINT: The user's intent and proposed relationships.
+2. FULL_SCHEMA: The actual Node Labels, Relationship Types, AND their Properties.
+
+TASK:
+1. Select ONLY the Node Labels and Relationship Types relevant to the blueprint.
+2. MAPPING (CRITICAL): You must explicity map the User's terminology to the Schema's terminology.
+   - `verb_mapping`: Map each verb in `proposed_relationships` to the Schema Relationship Type.
+     * STRICT RULE: The value MUST be the EXACT string from the schema (e.g., "FINANCIAL_TRANSACTION", not "Financial Transaction").
+     * Example: `{{"paid": "FINANCIAL_TRANSACTION", "visited": "TRAVEL_EVENT"}}`
+   - `entity_mapping`: Map entities/constraints to the Schema Node Label.
+     * Example: `{{"island": "LOCATION", "company": "ORGANIZATION"}}`
+
+3. Populate 'NodeProperties' and 'RelationshipProperties' with the valid keys for the selected types.
+""",
+
+    "Grounding Agent": """
+You are a Graph Grounding expert. Map the blueprint to the specific Schema provided.
+
+INPUTS:
+- BLUEPRINT: User's original intent.
+- SCHEMA: Pruned schema WITH MAPPING GUIDES (`verb_mapping`, `entity_mapping`).
+
+TASK: Create a blueprint where 'relationship_paths' uses the EXACT relationship types from the SCHEMA.
+
+RULES:
+1. USE THE MAP: Do not guess. Look at `schema.verb_mapping`.
+   - If the map says "paid" -> "FINANCIAL_TRANSACTION", use "FINANCIAL_TRANSACTION".
+
+2. HANDLING AMBIGUITY (OR Logic): If the user targets multiple types, use pipes `|`.
+   - Example Nodes: `Person|Organization`
+
+3. STRICT ATTRIBUTE FILTERING (CRITICAL):
+   - **TARGET NODES ONLY:** You may ONLY apply name filters to nodes labeled `PERSON`. Do NOT filter `LOCATION`, `ORGANIZATION`, etc. by name (map them to Labels instead).
+   - **FUZZY MATCHING REQUIRED:** When filtering properties, you MUST use `toLower(n.prop) CONTAINS 'value'`.
+     * FORBIDDEN: Do NOT use strict equality (`=`).
+     * BAD: `WHERE n.name = 'John'`
+     * GOOD: `WHERE toLower(n.name) CONTAINS 'john'`
+   - **NEGATIVE CONSTRAINTS:** For "is not X", use `NOT toLower(n.name) CONTAINS 'x'`.
+     * FORBIDDEN: Do NOT use `<>` or `!=`.
+     * BAD: `WHERE n.name <> 'Gates'`
+     * GOOD: `WHERE NOT toLower(n.name) CONTAINS 'gates'`
+   - **LOWERCASE VALUES:** Always convert the target string to lowercase in the query (e.g. `'john'`, not `'John'`).
+
+4. PATH PARSIMONY: Do not add redundant or mirrored relationships.
+   - If the Blueprint asks for 2 steps (e.g., "paid" and "visited"), generate exactly 2 relationships. Do not hallucinate a 3rd step or "double back" unless the logic strictly demands it.
+
+PROVENANCE FOR RELATIONSHIPS: Return provenance from the RELATIONSHIPS. Use `coalesce(r.source_pks)` to make sure the user can properly analyze the results.
+PROVENANCE FOR Documents: If the relationship is 'MENTIONED_IN'. Use `coalesce(d.doc_id)` for nodes labeled as 'Document'.
+CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed in the Schema's NodeProperties.
+""",
+       "Cypher Generator": """
+You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query.
+
+RULES:
+1. SAFE RETURN POLICY (STRICT):
+   - For NODES: You MUST ONLY return the `.name` property (e.g., `n.name`).
+   - DO NOT return generic properties like `.title`, `.age`, `.role` even if the user asks, as they are unreliable.
+   - For PROVENANCE: Always return `coalesce(r.source_pks, r.doc_id)`.
+
+2. STRING MATCHING (MANDATORY): For ALL string property filters in WHERE clauses, you MUST use `toLower(n.prop) CONTAINS 'value'`.
+   - BAD: `WHERE n.name = 'John Doe'`
+   - GOOD: `WHERE toLower(n.name) CONTAINS 'john doe'`
+   - **NEGATIVE MATCHING:** For exclusion, use `NOT ... CONTAINS`.
+     - BAD: `WHERE n.name <> 'Gates'`
+     - GOOD: `WHERE NOT toLower(n.name) CONTAINS 'gates'`
+
+3. PATHS & LOGIC:
+   - **Continuous Paths:** Ensure the path is fully connected. `(a)-[r1]->(b)-[r2]->(c)`. NEVER use comma-separated disconnected patterns like `MATCH (a), (b)` (Cartesian Product).
+   - **OR Logic:** If the Grounding Agent provided pipes `|` in labels (e.g., `Person|Organization`), write them EXACTLY as provided in the Cypher (e.g., `(n:Person|Organization)`).
+
+4. PROPERTIES IN WHERE CLAUSES: You may use other properties (e.g. `.date`, `.status`) ONLY in the `WHERE` clause to filter data, and ONLY if they are explicitly listed in the Schema.
+5. DISTINCT: Always use `RETURN DISTINCT` to avoid duplicates.
+6. SYNTAX: Do not include semicolons at the end.
+""",
     "Query Debugger": (
         "You are an expert Neo4j Debugger. Analyze the error, warnings, and the failed query. "
         "1. If the error mentions missing properties (e.g. 'properties does not exist'), change `r.properties` to `properties(r)`.\n"
@@ -768,12 +875,24 @@ SYSTEM_PROMPTS = {
         "3. SCHEMA CHECK: You MUST NOT invent new relationship types or properties. You must check the `schema` provided in the context and only use elements listed there.\n"
         "Provide a `fixed_cypher` string with the correction."
     ),
-    "Synthesizer": (
-        "You are a conversational AI. Explain the cypher query, explaining it compared to the users question mentioning which data might be captured with it." 
-        "Make sure the user knows which other details might be caught that might have been unintended, focusing on the fact that we use only relationships and do not filter nodes other than Person nodes" 
-        "Make sure to mention that this is a wide search and furhter questions can be asked at the analysis section which currently contains only the emails from the oversight comittee released in the November of 2025. After that summarize what you see in the database preview specifically mentioning that you do not see all of the documents. "
-        "If the result is empty, state clearly that no information was found."
-    )
+    "Synthesizer": """
+You are a helpful Data Analyst / Investigator. Your goal is to answer the user's question directly based on the database results.
+
+GUIDELINES:
+1. **ANSWER FIRST**: Start immediately with the findings. Do NOT explain the Cypher query structure (e.g., "I matched a Person node...") unless the results are ambiguous and require technical context.
+   - YES: "I found 36 individuals who fit the criteria, including..."
+   - NO: "The query used a MATCH clause to find..."
+
+2. **CATEGORIZE FINDINGS**:
+   - **Key Individuals**: List specific, recognizable names (e.g., "Bill Clinton", "Prince Andrew").
+   - **Ambiguous Entries**: Group generic terms (e.g., "Sender", "You", "She") separately so they don't clutter the main answer.
+
+3. **CONTEXT**: Briefly mention that these results come from a broad relationship search and may include indirect connections.
+
+4. **PROVENANCE**: Mention that the specific documents linking these people can be found in the evidence locker (referenced by the IDs in the data).
+
+5. **EMPTY RESULTS**: If the result list is empty, state clearly "No matching records found in the current dataset using the current query."
+"""
 }
 
 # --- UTILITIES ---
@@ -1343,46 +1462,234 @@ def screen_analysis():
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
             st.info(resp.content)
 
+
 # --- MAIN NAVIGATION ---
+def inject_custom_css():
+    """
+    Hides the standard Streamlit sidebar and applies styling for the cockpit layout.
+    """
+    st.markdown(
+        """
+        <style>
+            /* 1. Hide the default Streamlit Sidebar elements */
+            [data-testid="stSidebar"] { display: none; }
+            [data-testid="collapsedControl"] { display: none; }
+            
+            /* 2. Main Layout Adjustment */
+            .stApp {
+                background-color: #0E1117; /* Deep Slate / Black */
+                color: #FFFFFF;
+            }
 
-# 1. Try to initialize (Auto-connect on startup)
-init_app()
+            .block-container {
+                padding-top: 4rem; 
+                padding-bottom: 2rem;
+                padding-left: 2rem;
+                padding-right: 2rem;
+                max_width: 100%;
+            }
 
-# 2. Sidebar Navigation
-with st.sidebar:
-    st.header("Graph Analyst")
+            /* 3. TECH BUTTON STYLING */
+            div.stButton > button {
+                width: 100%;
+                background-color: #1F2129; 
+                color: #FFFFFF !important; 
+                border: 1px solid #41444C;
+                border-radius: 4px;
+                height: 3.5em;
+                font-family: 'Source Sans Pro', sans-serif;
+                font-weight: 700 !important;
+                letter-spacing: 0.5px;
+                transition: all 0.2s ease-in-out; 
+            }
+
+            /* ACCENT: Cyan Border & Text on Hover */
+            div.stButton > button:hover {
+                background-color: #1F2129; 
+                border-color: #00ADB5 !important; /* Cyan Accent */     
+                color: #00ADB5 !important;        /* Cyan Text */
+                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3); /* Subtle Glow */          
+            }
+            
+            /* 4. GLOBAL TEXT STYLING */
+            h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown, .stText, .stCaption {
+                color: #FFFFFF !important;
+                font-weight: 600 !important; 
+            }
+
+            /* 5. Tighter Dividers */
+            hr {
+                border-color: #41444C;
+                margin-top: 0.5em !important;
+                margin-bottom: 0.5em !important;
+            }
+
+            /* 6. EXPANDER (DATABOOK DROPDOWNS) FIX */
+            
+            /* Target the HTML <details> and <summary> elements directly */
+            
+            /* The Container (Closed state usually) */
+            div[data-testid="stExpander"] details {
+                background-color: #1F2129 !important;
+                border-color: #41444C !important;
+                border-radius: 4px;
+            }
+
+            /* The Clickable Header (Summary) */
+            div[data-testid="stExpander"] summary {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+                border: 1px solid #41444C !important;
+                border-radius: 4px;
+                transition: border-color 0.2s, color 0.2s;
+            }
+
+            /* ACCENT: Hover state for the Expander Header */
+            div[data-testid="stExpander"] summary:hover {
+                background-color: #1F2129 !important; 
+                border-color: #00ADB5 !important; /* Cyan Border */
+                color: #00ADB5 !important; /* Cyan Text */
+            }
+
+            /* Force the text inside the summary (the label) to be white/cyan */
+            div[data-testid="stExpander"] summary span,
+            div[data-testid="stExpander"] summary p {
+                 color: inherit !important;
+            }
+
+            /* The SVG Arrow inside the header */
+            div[data-testid="stExpander"] summary svg {
+                fill: #FFFFFF !important;
+            }
+            div[data-testid="stExpander"] summary:hover svg {
+                fill: #00ADB5 !important;
+            }
+            
+            /* The Content Box that opens up */
+            div[data-testid="stExpander"] div[role="group"] {
+                 background-color: #0E1117 !important; /* Match main background */
+                 color: #FFFFFF !important;
+                 border: 1px solid #41444C;
+            }
+
+            /* 7. CHECKBOX & INPUT FIXES INSIDE EXPANDER */
+            
+            /* Checkbox Label Text */
+            label[data-baseweb="checkbox"] span {
+                color: #FFFFFF !important;
+            }
+            
+            /* ACCENT: Input Focus States */
+            /* Text Input field styling */
+            div[data-baseweb="input"] {
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C !important; 
+            }
+            div[data-baseweb="input"] input {
+                color: #FFFFFF !important;
+            }
+            /* Focus Accent for Inputs */
+            div[data-baseweb="input"]:focus-within {
+                border-color: #00ADB5 !important;
+                box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
-    # Navigation Options
-    nav_options = ["Databook", "Search", "Locker", "Analysis"]
-    nav = st.radio("Navigation", nav_options)
+def set_page(page_name):
+    """Helper to update the current page in session state."""
+    st.session_state.current_page = page_name
+
+def main():
+    # 1. Setup & Styling
+    st.set_page_config(layout="wide", page_title="Graph Analyst")
     
-    st.divider()
+    # Initialize LangSmith env vars immediately
+    setup_langsmith()
     
-    # NEW: Settings Button (Opens the pop-up dialog)
-    if st.button("⚙️ Settings"):
-        show_settings_dialog()
+    inject_custom_css()
     
-    # NEW: Connection Status & Logout
-    if st.session_state.app_state["connected"]:
-        st.caption("🟢 Connected")
-        if st.button("Logout"):
+    # Initialize app (secrets, state)
+    init_app()
+
+    # Initialize Page State if not present
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "Databook"
+
+    # 2. Connection Gatekeeper
+    if not st.session_state.app_state["connected"]:
+        st.info("👋 Welcome! The app is disconnected. Please connect below.")
+        if st.button("⚙️ Settings"):
+            show_settings_dialog()
+        return
+
+    # 3. Cockpit Layout (3 Columns)
+    # Ratios: [1.2, 8, 1.2]
+    c_left, c_main, c_right = st.columns([1.2, 8, 1.2], gap="medium")
+
+    # --- LEFT COLUMN (Input & Config) ---
+    with c_left:
+        st.markdown("### 📥 Input") 
+        
+        # Navigation Buttons (Using callbacks for single-click nav)
+        st.button("📖 Data",  use_container_width=True, 
+                  on_click=set_page, args=("Databook",))
+            
+        st.button("🔍 Search", use_container_width=True,
+                  on_click=set_page, args=("Search",))
+
+        # Vertical Spacer to push Config to bottom
+        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Settings at bottom
+        if st.button("⚙️ Config", use_container_width=True):
+            show_settings_dialog()
+
+    # --- CENTER COLUMN (Main Router) ---
+    with c_main:
+        with st.container():
+            # Router Logic
+            current = st.session_state.current_page
+            
+            if current == "Databook":
+                screen_databook()
+            elif current == "Search":
+                screen_extraction()
+            elif current == "Locker":
+                screen_locker()
+            elif current == "Analysis":
+                screen_analysis()
+            else:
+                st.error(f"Unknown page: {current}")
+
+    # --- RIGHT COLUMN (Output & Tools) ---
+    with c_right:
+        st.markdown("### 📤 Output")
+        
+        # Locker Badge Calculation
+        locker_count = len(st.session_state.app_state["evidence_locker"])
+        badge = f" ({locker_count})" if locker_count > 0 else ""
+        
+        st.button(f"🗄️ Locker{badge}",  use_container_width=True,
+                  on_click=set_page, args=("Locker",))
+            
+        st.button("📈 Analysis",  use_container_width=True,
+                  on_click=set_page, args=("Analysis",))
+            
+        # Vertical Spacer to push Logout to bottom
+        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
+
+        st.divider()
+        
+        # Logout
+        if st.button("Logout", use_container_width=True):
             st.session_state.app_state["connected"] = False
-            st.session_state.has_tried_login = False # Reset so it doesn't auto-login immediately
+            st.session_state.has_tried_login = False
             st.rerun()
-    else:
-        st.caption("🔴 Disconnected")
 
-# 3. Main Content Router
-if not st.session_state.app_state["connected"]:
-    # Landing message instead of the old 'screen_connection()'
-    st.info("👋 Welcome! The app is disconnected.\n\nIf you set up your Secrets correctly, this should not appear.\n\nOtherwise, click **⚙️ Settings** in the sidebar to connect manually.")
-else:
-    # Router to your screens
-    if nav == "Databook": 
-        screen_databook()
-    elif nav == "Search": 
-        screen_extraction()
-    elif nav == "Locker": 
-        screen_locker()
-    elif nav == "Analysis": 
-        screen_analysis()
+if __name__ == "__main__":
+    main()
