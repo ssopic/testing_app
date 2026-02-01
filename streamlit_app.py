@@ -1695,6 +1695,27 @@ def inject_custom_css():
                 color: #FFFFFF !important;
                 border: 1px solid #41444C;
             }
+
+            /* 11. JSON & RAW TEXT FIXES (For Traces/Debug Data) */
+            
+            /* Target the JSON viewer specifically (st.json) */
+            div[data-testid="stJson"],
+            .react-json-view {
+                background-color: #0E1117 !important;
+                color: #FFFFFF !important;
+            }
+            
+            /* Force keys/values in JSON to be visible */
+            .react-json-view span {
+                color: #00ADB5 !important; /* Cyan for values */
+            }
+            
+            /* st.text() raw output */
+            div[data-testid="stText"] {
+                background-color: #0E1117 !important;
+                color: #00ADB5 !important; /* Cyan for raw text logs */
+                font-family: 'Courier New', monospace !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
