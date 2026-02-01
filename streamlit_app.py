@@ -378,33 +378,44 @@ def render_explorer_workspace(selector_type, selected_items):
         st.subheader("Extraction")
         st.caption("Select data to add to Evidence Locker")
 
-        # --- Cascading Filters ---
+        # --- UPDATED: Multi-Select Cascading Filters ---
+        
+        # 1. Edge Filter (Multi)
         edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-        selected_edge_filter = st.selectbox(
+        
+        selected_edges = st.multiselect(
             "Filter by Relationship:",
-            ["All"] + edge_options,
-            key="filter_edge"
+            options=edge_options,
+            default=[], # Empty implies "All"
+            placeholder="Select relationships (Empty = All)",
+            key="filter_edge_multi"
         )
 
-        # 2. Target Label Filter
-        if selected_edge_filter == "All":
+        # 2. Target Label Filter (Multi)
+        # Determine valid target labels based on edge selection
+        if not selected_edges:
+            # If no specific edges selected, use all data for target options
             filtered_df_step1 = df
-            target_options = sorted(df['connected_node_label'].unique()) if 'connected_node_label' in df.columns else []
         else:
-            filtered_df_step1 = df[df['edge'] == selected_edge_filter]
-            target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
+            # FIX: Use .isin() for list comparison
+            filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+            
+        target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
 
-        selected_target_filter = st.selectbox(
+        selected_targets = st.multiselect(
             "Filter by Target Type:",
-            ["All"] + target_options,
-            key="filter_target"
+            options=target_options,
+            default=[], # Empty implies "All"
+            placeholder="Select target types (Empty = All)",
+            key="filter_target_multi"
         )
 
         # 3. Apply Final Filter
-        if selected_target_filter == "All":
+        if not selected_targets:
             final_filtered_df = filtered_df_step1
         else:
-            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'] == selected_target_filter]
+            # FIX: Use .isin() for list comparison
+            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
 
         # 4. Flatten IDs
         def deep_flatten(container):
@@ -430,7 +441,6 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 # Construct query description
                 if len(names) > 1:
-                    # FIX: Distinctly list verbs for relationship analysis so user knows what they selected
                     if selector_type == "Verb":
                         name_str = f"Verbs: {', '.join(names)}"
                     else:
@@ -440,13 +450,16 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 query_desc = f"Manual Explorer: {name_str}"
                 filters = []
-                if selected_edge_filter != "All":
-                    filters.append(f"Edge: {selected_edge_filter}")
-                if selected_target_filter != "All":
-                    filters.append(f"Target: {selected_target_filter}")
+                
+                # Logic to describe filters: "All" or list of items
+                if selected_edges:
+                    filters.append(f"Edges: {', '.join(selected_edges)}")
+                
+                if selected_targets:
+                    filters.append(f"Targets: {', '.join(selected_targets)}")
                 
                 if filters:
-                    query_desc += f" ({', '.join(filters)})"
+                    query_desc += f" ({'; '.join(filters)})"
 
                 payload = {
                     "query": query_desc,
