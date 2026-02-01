@@ -1606,6 +1606,47 @@ def inject_custom_css():
                 border-color: #00ADB5 !important;
                 box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
             }
+
+            /* 8. MULTISELECT & DROPDOWN LIST FIXES */
+
+            /* The Selected Tags (Chips) */
+            span[data-baseweb="tag"] {
+                background-color: #31333F !important; /* Distinct from bg */
+                color: #FFFFFF !important;
+                border: 1px solid #41444C;
+            }
+            
+            /* The 'X' icon in tags */
+            span[data-baseweb="tag"] svg {
+                fill: #FFFFFF !important;
+            }
+            
+            /* The Dropdown Menu Container */
+            div[data-baseweb="popover"],
+            div[data-baseweb="menu"] {
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C !important;
+            }
+            
+            /* The Options in the Dropdown */
+            li[role="option"] {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+            }
+            
+            /* Hover/Selected Option */
+            li[role="option"]:hover,
+            li[role="option"][aria-selected="true"] {
+                background-color: #31333F !important;
+                color: #00ADB5 !important; /* Cyan Text */
+            }
+            
+            /* Fix for MultiSelect Input Container Background */
+            div[data-baseweb="select"] > div {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+                border-color: #41444C !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
