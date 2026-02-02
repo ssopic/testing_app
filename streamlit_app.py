@@ -584,7 +584,7 @@ def screen_databook():
                                                 )
                                             with c_btn:
                                                 # Button triggers rerun naturally
-                                                st.button("⏎", key=f"btn_{search_key}", help="Apply Filter", use_container_width=True)
+                                                st.button("⏎", key=f"btn_{search_key}",  use_container_width=True)
 
                                             filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
                                             
@@ -1492,7 +1492,10 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
-            div.stButton > button {
+            /* Target ALL buttons, including secondary (default) ones which are usually white */
+            div.stButton > button,
+            div.stButton > button:focus,
+            div.stButton > button:active {
                 width: 100%;
                 background-color: #1F2129 !important; /* Force Dark Background */
                 color: #FFFFFF !important; 
@@ -1503,6 +1506,7 @@ def inject_custom_css():
                 font-weight: 700 !important;
                 letter-spacing: 0.5px;
                 transition: all 0.2s ease-in-out; 
+                box-shadow: none !important;
             }
 
             /* ACCENT: Cyan Border & Text on Hover */
@@ -1510,7 +1514,7 @@ def inject_custom_css():
                 background-color: #1F2129 !important; 
                 border-color: #00ADB5 !important; /* Cyan Accent */     
                 color: #00ADB5 !important;        /* Cyan Text */
-                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3); /* Subtle Glow */          
+                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3) !important; /* Subtle Glow */          
             }
             
             /* 4. GLOBAL TEXT STYLING */
