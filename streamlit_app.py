@@ -425,8 +425,9 @@ def render_explorer_workspace(selector_type, selected_items):
                 elif pd.notna(i) and i != "":
                     yield str(i)
 
-
+        st.divider()
         if st.button("ADD TO EVIDENCE CART", type="primary", use_container_width=True):
+        st.divider()
 
             if not unique_ids:
                 st.error("No documents to add.")
