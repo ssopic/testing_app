@@ -425,21 +425,9 @@ def render_explorer_workspace(selector_type, selected_items):
                 elif pd.notna(i) and i != "":
                     yield str(i)
 
-        all_ids = []
-        if 'id_list' in final_filtered_df.columns:
-            all_ids = list(deep_flatten(final_filtered_df['id_list']))
-        
-        unique_ids = list(set(all_ids))
-        
-        st.metric("Documents Found", len(unique_ids))
-        with st.expander("Preview ID List", expanded=False):
-            st.write(unique_ids)
 
-        #TEST HERE
-        st.subheader("Add data to")
-        st.subheader("EVIDENCE CART")
+        if st.button("ADD TO EVIDENCE CART", type="primary", use_container_width=True):
 
-        if st.button("Add to Locker", type="primary", use_container_width=True):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
@@ -476,7 +464,17 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
-                
+
+                all_ids = []
+        if 'id_list' in final_filtered_df.columns:
+            all_ids = list(deep_flatten(final_filtered_df['id_list']))
+        
+        unique_ids = list(set(all_ids))
+        
+        st.metric("Documents Found", len(unique_ids))
+        with st.expander("Preview ID List", expanded=False):
+            st.write(unique_ids)
+        
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
         st.caption(f"Total items in Locker: {current_count}")
         
