@@ -1716,6 +1716,81 @@ def inject_custom_css():
                 color: #00ADB5 !important; /* Cyan for raw text logs */
                 font-family: 'Courier New', monospace !important;
             }
+
+            /* 12. SETTINGS DIALOG (MODAL) FIXES */
+
+            /* The Modal Background (The popup box itself) */
+            div[role="dialog"][aria-modal="true"] {
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C !important;
+                color: #FFFFFF !important;
+            }
+
+            /* Modal Header */
+            div[role="dialog"] header {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+            }
+
+            /* Content Text inside Modal */
+            div[role="dialog"] div, 
+            div[role="dialog"] label,
+            div[role="dialog"] p {
+                color: #FFFFFF !important;
+            }
+
+            /* Close Button (X) */
+            button[aria-label="Close"] {
+                color: #FFFFFF !important;
+                background-color: transparent !important;
+                border: none !important;
+            }
+            button[aria-label="Close"]:hover {
+                color: #00ADB5 !important;
+            }
+
+            /* 13. VERTICAL SEPARATION LINES (Column Borders) - DEPTH-BASED SELECTOR */
+            
+            /* We target the Top-Level Horizontal Block by limiting the depth from .block-container.
+               Nested blocks (inside other columns) are too deep to match these selectors.
+            */
+
+            /* LEFT FRAME (First Column) */
+            /* Covers standard structure: block-container -> vertical-block -> horizontal-block */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
+            /* Compatibility for older/newer testids */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1),
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
+                border-right: 3px solid #00ADB5 !important; 
+                background-color: #14171F; 
+                padding: 1rem !important;
+                min-height: 85vh; 
+                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); 
+            }
+            
+            /* RIGHT FRAME (Last Column) */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
+            /* Compatibility */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child,
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
+                border-left: 3px solid #00ADB5 !important;
+                background-color: #14171F;
+                padding: 1rem !important;
+                min-height: 85vh;
+                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); 
+            }
+            
+            /* Reset nested columns just in case */
+            [data-testid="stColumn"] [data-testid="stHorizontalBlock"] [data-testid="stColumn"],
+            [data-testid="column"] [data-testid="stHorizontalBlock"] [data-testid="column"] {
+                border: none !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+                min-height: 0 !important;
+                padding: 0 !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
