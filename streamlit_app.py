@@ -1749,40 +1749,39 @@ def inject_custom_css():
                 color: #00ADB5 !important;
             }
 
-            /* 13. VERTICAL SEPARATION LINES (Column Borders) - EXTREME VISIBILITY */
+            /* 13. VERTICAL SEPARATION LINES (Column Borders) - SCOPED TO ROOT ONLY */
             
-            /* Targeting both [data-testid="column"] (old) and [data-testid="stColumn"] (new)
-               to ensure compatibility.
+            /* We use the direct child combinator (>) to strictly target ONLY the 
+               Top-Level columns (Cockpit Frame). 
+               This prevents the style from leaking into nested columns (like buttons/filters).
             */
 
-            /* Left Column: Cyan Border + Glow + Background */
-            div[data-testid="column"]:nth-of-type(1),
-            div[data-testid="stColumn"]:nth-of-type(1) {
+            /* LEFT FRAME (First Top-Level Column) */
+            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
+            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
                 border-right: 3px solid #00ADB5 !important; 
-                background-color: #14171F; /* Panel Background */
+                background-color: #14171F; 
                 padding: 1rem !important;
-                min-height: 85vh; /* Force height to bottom of screen */
-                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow right */
+                min-height: 85vh; /* Full height */
+                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow inwards */
             }
             
-            /* Right Column: Cyan Border + Glow + Background */
-            div[data-testid="column"]:last-child,
-            div[data-testid="stColumn"]:last-child {
+            /* RIGHT FRAME (Last Top-Level Column) */
+            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
+            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
                 border-left: 3px solid #00ADB5 !important;
                 background-color: #14171F;
                 padding: 1rem !important;
                 min-height: 85vh;
-                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow left */
+                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow inwards */
             }
             
-            /* Reset for single/nested columns to prevent layout breakage inside the app */
-            div[data-testid="column"]:only-child,
-            div[data-testid="stColumn"]:only-child {
-                border: none !important;
+            /* Force Middle Column to be transparent (just in case) */
+            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(2),
+            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(2) {
                 background-color: transparent !important;
                 box-shadow: none !important;
-                min-height: 0 !important;
-                padding: 0 !important;
+                border: none !important;
             }
         </style>
         """,
