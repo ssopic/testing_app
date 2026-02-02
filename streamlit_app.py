@@ -440,7 +440,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
         # accent line
         st.markdown(accent_line, unsafe_allow_html=True)
-        st.subheader("Add to Evidence Cart", divider="gray")
+        st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         
         if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
             if not unique_ids:
