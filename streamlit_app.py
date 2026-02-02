@@ -1550,6 +1550,26 @@ def inject_custom_css():
                 font-weight: 600 !important; 
             }
 
+            /* COMPACT HEADERS: Reduce vertical spacing to allow stacking (e.g. "Add data to" + "Evidence Cart") */
+            h1, h2, h3 {
+                padding-top: 0.5rem !important;
+                padding-bottom: 0.1rem !important; 
+                margin-top: 0rem !important;
+                margin-bottom: 0rem !important;
+                line-height: 1.4 !important;
+            }
+
+            /* FIX FOR MULTI-LINE HEADERS (st.subheader with \n) */
+            /* Forces <p> tags created by newlines inside headers to match the header size */
+            h1 p, h2 p, h3 p, h4 p, h5 p, h6 p,
+            h1 span, h2 span, h3 span, h4 span, h5 span, h6 span {
+                font-size: inherit !important;
+                font-weight: inherit !important;
+                color: inherit !important;
+                line-height: 1.2 !important; 
+                margin-bottom: 0 !important;
+            }
+
             /* FIX FOR MULTI-LINE HEADERS (st.subheader with \n) */
             /* Forces <p> tags created by newlines inside headers to match the header size */
             h1 p, h2 p, h3 p, h4 p, h5 p, h6 p,
