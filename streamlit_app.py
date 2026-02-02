@@ -465,7 +465,7 @@ def render_explorer_workspace(selector_type, selected_items):
                 st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
         st.divider()
 
-                all_ids = []
+        all_ids = []
         if 'id_list' in final_filtered_df.columns:
             all_ids = list(deep_flatten(final_filtered_df['id_list']))
         
