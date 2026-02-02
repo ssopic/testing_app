@@ -1749,39 +1749,47 @@ def inject_custom_css():
                 color: #00ADB5 !important;
             }
 
-            /* 13. VERTICAL SEPARATION LINES (Column Borders) - SCOPED TO ROOT ONLY */
+            /* 13. VERTICAL SEPARATION LINES (Column Borders) - DEPTH-BASED SELECTOR */
             
-            /* We use the direct child combinator (>) to strictly target ONLY the 
-               Top-Level columns (Cockpit Frame). 
-               This prevents the style from leaking into nested columns (like buttons/filters).
+            /* We target the Top-Level Horizontal Block by limiting the depth from .block-container.
+               Nested blocks (inside other columns) are too deep to match these selectors.
             */
 
-            /* LEFT FRAME (First Top-Level Column) */
-            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
-            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
+            /* LEFT FRAME (First Column) */
+            /* Covers standard structure: block-container -> vertical-block -> horizontal-block */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
+            /* Compatibility for older/newer testids */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1),
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
                 border-right: 3px solid #00ADB5 !important; 
                 background-color: #14171F; 
                 padding: 1rem !important;
-                min-height: 85vh; /* Full height */
-                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow inwards */
+                min-height: 85vh; 
+                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); 
             }
             
-            /* RIGHT FRAME (Last Top-Level Column) */
-            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
-            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
+            /* RIGHT FRAME (Last Column) */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
+            /* Compatibility */
+            .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child,
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
                 border-left: 3px solid #00ADB5 !important;
                 background-color: #14171F;
                 padding: 1rem !important;
                 min-height: 85vh;
-                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow inwards */
+                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); 
             }
             
-            /* Force Middle Column to be transparent (just in case) */
-            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(2),
-            section[data-testid="stMain"] .block-container > div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(2) {
+            /* Reset nested columns just in case */
+            [data-testid="stColumn"] [data-testid="stHorizontalBlock"] [data-testid="stColumn"],
+            [data-testid="column"] [data-testid="stHorizontalBlock"] [data-testid="column"] {
+                border: none !important;
                 background-color: transparent !important;
                 box-shadow: none !important;
-                border: none !important;
+                min-height: 0 !important;
+                padding: 0 !important;
             }
         </style>
         """,
