@@ -436,7 +436,7 @@ def render_explorer_workspace(selector_type, selected_items):
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
 
-        if st.button("Add to Locker", type="primary", use_container_width=True):
+        if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
