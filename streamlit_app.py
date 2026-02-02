@@ -375,7 +375,7 @@ def render_explorer_workspace(selector_type, selected_items):
         st.plotly_chart(fig, use_container_width=True)
 
     with c_right:
-        st.subheader("Extraction", divider = "gray)
+        st.subheader("Extraction", divider = "gray")
         st.caption("Select data to add to Evidence Locker")
 
         # --- UPDATED: Multi-Select Cascading Filters ---
