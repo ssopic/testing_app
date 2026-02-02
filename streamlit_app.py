@@ -436,7 +436,7 @@ def render_explorer_workspace(selector_type, selected_items):
             st.write(unique_ids)
 
         #TEST HERE
-        st.text("---")
+        st.divider(color="cyan")
 
 
         if st.button("Add to Locker", type="primary", use_container_width=True):
