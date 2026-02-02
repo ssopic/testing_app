@@ -480,9 +480,6 @@ def render_explorer_workspace(selector_type, selected_items):
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
 
-        #accent line
-        st.markdown(accent_line, unsafe_allow_html=True)
-
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
         st.caption(f"Total items in Locker: {current_count}")
         
