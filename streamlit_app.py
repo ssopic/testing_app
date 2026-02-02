@@ -430,8 +430,8 @@ def render_explorer_workspace(selector_type, selected_items):
             all_ids = list(deep_flatten(final_filtered_df['id_list']))
         
         unique_ids = list(set(all_ids))
-        string = "Documents Found: " + len(unique_ids) 
-        st.metric(string)
+        string = "Documents Found: " + str(len(unique_ids)) 
+        st.text(string)
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
 
