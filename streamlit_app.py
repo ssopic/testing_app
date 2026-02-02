@@ -540,12 +540,11 @@ def screen_databook():
 
                 st.divider()
 
-            # 3. Scrollable List Container
-            with st.container(height=400, border=True):
+            # 3. Scrollable List Container (FIXED HEIGHT)
+            with st.container(height=400, border=False):
                 # --- LOGIC FOR LEXICAL (Placeholder) ---
                 if selector_type == "Lexical":
                      st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
-                     # No further logic executes for this branch
 
                 # --- LOGIC FOR OBJECT & VERB ---
                 else:
@@ -573,7 +572,20 @@ def screen_databook():
                                         names = sorted(list(set(str(n) for n in clean_names)))
                                         
                                         if names:
-                                            search_term = st.text_input(f"Search {label}", placeholder="Filter...", key=search_key)
+                                            # UPDATED SEARCH BAR
+                                            # Using [5, 1] ratio for a tighter "icon-like" button
+                                            c_search, c_btn = st.columns([5, 1])
+                                            with c_search:
+                                                search_term = st.text_input(
+                                                    f"Search {label}", 
+                                                    placeholder=f"Filter...", 
+                                                    key=search_key,
+                                                    label_visibility="collapsed"
+                                                )
+                                            with c_btn:
+                                                # Button triggers rerun naturally
+                                                st.button("⏎", key=f"btn_{search_key}", help="Apply Filter", use_container_width=True)
+
                                             filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
                                             
                                             if not filtered_names:
@@ -603,11 +615,22 @@ def screen_databook():
                                 rel_types = sorted(list(available_data.keys()))
                                 if rel_types:
                                     search_key = f"search_{selector_type}"
-                                    search_term = st.text_input("Search Relationships", placeholder="Filter...", key=search_key)
+                                    
+                                    # UPDATED SEARCH BAR
+                                    c_search, c_btn = st.columns([5, 1])
+                                    with c_search:
+                                        search_term = st.text_input(
+                                            "Search Relationships", 
+                                            placeholder="Filter...", 
+                                            key=search_key,
+                                            label_visibility="collapsed"
+                                        )
+                                    with c_btn:
+                                        st.button("⏎", key=f"btn_{search_key}", help="Apply Filter", use_container_width=True)
+                                    
                                     filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
                                     
                                     for r_type in filtered_rels:
-                                        # Use "Verb" as the label for backend logic
                                         is_selected = ("Verb", r_type) in st.session_state.databook_selections
                                         chk_key = f"chk_verb_{r_type}"
                                         
@@ -624,7 +647,6 @@ def screen_databook():
                             st.error("Invalid inventory format.")
 
     with c_workspace:
-        # Don't try to render workspace for Lexical placeholder
         if selector_type != "Lexical":
             render_explorer_workspace(
                 selector_type, 
@@ -1256,40 +1278,7 @@ def show_settings_dialog():
             else:
                 st.error(msg)
 
-#old version. probabbly going to delete
-# def init_app():
-#     """
-#     Runs once on app startup to try auto-login using Secrets/Env Vars.
-#     """
-#     if st.session_state.get("has_tried_login", False):
-#         return
 
-#     # 1. NEW: Setup LangSmith 
-#     # This MUST happen here so the library finds the key when the pipeline runs later
-#     ls_key = get_config("LANGCHAIN_API_KEY") 
-#     if ls_key:
-#         os.environ["LANGCHAIN_API_KEY"] = ls_key
-#         os.environ["LANGCHAIN_TRACING_V2"] = "true"
-#         os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
-#         os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
-#     if "app_session_id" not in st.session_state:
-#         st.session_state["app_session_id"] = str(uuid.uuid4())
-
-#     # 2. Get DATABASE and mistral keys
-#     m_key = get_config("MISTRAL_API_KEY")
-#     n_uri = get_config("NEO4J_URI")
-#     n_user = get_config("NEO4J_USER", "neo4j")
-#     n_pass = get_config("NEO4J_PASSWORD")
-
-#     # Only attempt if we actually have credentials
-#     if n_uri and n_pass and m_key:
-#         success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
-#         if not success:
-#             # Pop-up toast notification of failure (non-intrusive)
-#             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
-    
-#     st.session_state.has_tried_login = True
-# FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
     st.title("🔍 Extraction & Cypher Sandbox")
