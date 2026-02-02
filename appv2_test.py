@@ -1791,6 +1791,33 @@ def inject_custom_css():
                 min-height: 0 !important;
                 padding: 0 !important;
             }
+
+            /* 14. SEARCH BAR & TEXT INPUT FIXES (FIXING WHITE-ON-WHITE) */
+            
+            /* The Container */
+            div[data-testid="stTextInput"] div[data-baseweb="input"] {
+                background-color: #1F2129 !important;
+                border-color: #41444C !important;
+                border-radius: 4px;
+            }
+            
+            /* The Input Field Itself */
+            div[data-testid="stTextInput"] input {
+                color: #FFFFFF !important;
+                background-color: #1F2129 !important;
+                caret-color: #00ADB5 !important; /* Cyan caret */
+            }
+            
+            /* Placeholder Text */
+            div[data-testid="stTextInput"] input::placeholder {
+                color: #B0B0B0 !important;
+            }
+
+            /* Focus state for text input */
+            div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within {
+                border-color: #00ADB5 !important;
+                box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
+            }
         </style>
         """,
         unsafe_allow_html=True
