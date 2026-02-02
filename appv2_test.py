@@ -375,8 +375,7 @@ def render_explorer_workspace(selector_type, selected_items):
         st.plotly_chart(fig, use_container_width=True)
 
     with c_right:
-        st.subheader("Add data to")
-        st.subheader("Evidence Cart", divider = "gray")
+        st.subheader("Filter Data", divider = "gray")
         st.caption("Filter by Relationships and Target Types")
 
         # --- UPDATED: Multi-Select Cascading Filters ---
@@ -435,6 +434,10 @@ def render_explorer_workspace(selector_type, selected_items):
         st.metric("Documents Found", len(unique_ids))
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
+
+        #TEST HERE
+        st.subheader("Add data to")
+        st.subheader("EVIDENCE CART")
 
         if st.button("Add to Locker", type="primary", use_container_width=True):
             if not unique_ids:
