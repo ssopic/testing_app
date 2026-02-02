@@ -436,8 +436,8 @@ def render_explorer_workspace(selector_type, selected_items):
             st.write(unique_ids)
 
         #TEST HERE
-        st.subheader("Add data to")
-        st.subheader("EVIDENCE CART")
+        st.text("---")
+
 
         if st.button("Add to Locker", type="primary", use_container_width=True):
             if not unique_ids:
