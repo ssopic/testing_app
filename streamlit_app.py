@@ -436,7 +436,7 @@ def render_explorer_workspace(selector_type, selected_items):
             st.write(unique_ids)
 
 
-        st.divider(color="gray")
+        st.subheader(color="violet")
         if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
             if not unique_ids:
                 st.error("No documents to add.")
