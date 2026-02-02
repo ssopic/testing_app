@@ -1749,25 +1749,32 @@ def inject_custom_css():
                 color: #00ADB5 !important;
             }
 
-            /* 13. VERTICAL SEPARATION LINES (Column Borders) */
+            /* 13. VERTICAL SEPARATION LINES (Column Borders) - EXTREME VISIBILITY */
             
-            /* Add a visible line to separate the Left Column (Input) */
+            /* Left Column: Cyan Border + Glow + Background */
             div[data-testid="column"]:nth-of-type(1) {
-                border-right: 2px solid #60646E !important; /* Thicker and Lighter */
-                padding-right: 1rem;
-                min-height: 85vh; /* Force full height visual */
+                border-right: 3px solid #00ADB5 !important; 
+                background-color: #14171F; /* Slightly lighter than main bg to act as panel */
+                padding: 1rem !important;
+                min-height: 70vh; /* Force height to look like a sidebar */
+                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow into main area */
             }
             
-            /* Add a visible line to separate the Right Column (Output) */
+            /* Right Column: Cyan Border + Glow + Background */
             div[data-testid="column"]:last-child {
-                border-left: 2px solid #60646E !important; /* Thicker and Lighter */
-                padding-left: 1rem;
-                min-height: 85vh; /* Force full height visual */
+                border-left: 3px solid #00ADB5 !important;
+                background-color: #14171F;
+                padding: 1rem !important;
+                min-height: 70vh;
+                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow into main area */
             }
             
-            /* Remove borders for single-column layouts to avoid weirdness */
+            /* Reset for single columns (so we don't break simple layouts) */
             div[data-testid="column"]:only-child {
                 border: none !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+                min-height: 0 !important;
                 padding: 0 !important;
             }
         </style>
