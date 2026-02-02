@@ -1751,16 +1751,18 @@ def inject_custom_css():
 
             /* 13. VERTICAL SEPARATION LINES (Column Borders) */
             
-            /* Add a subtle line to separate the Left Column (Input) */
+            /* Add a visible line to separate the Left Column (Input) */
             div[data-testid="column"]:nth-of-type(1) {
-                border-right: 1px solid #41444C;
+                border-right: 2px solid #60646E !important; /* Thicker and Lighter */
                 padding-right: 1rem;
+                min-height: 85vh; /* Force full height visual */
             }
             
-            /* Add a subtle line to separate the Right Column (Output) */
+            /* Add a visible line to separate the Right Column (Output) */
             div[data-testid="column"]:last-child {
-                border-left: 1px solid #41444C;
+                border-left: 2px solid #60646E !important; /* Thicker and Lighter */
                 padding-left: 1rem;
+                min-height: 85vh; /* Force full height visual */
             }
             
             /* Remove borders for single-column layouts to avoid weirdness */
