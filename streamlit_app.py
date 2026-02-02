@@ -1501,7 +1501,13 @@ def inject_custom_css():
                 color: #FFFFFF !important; 
                 border: 1px solid #41444C !important; /* Force Dark Border */
                 border-radius: 4px;
-                height: 3.5em;
+                
+                /* SIZE ADJUSTMENT: Matches standard input height */
+                min-height: 45px !important; 
+                height: auto !important;
+                padding-top: 0.5rem !important;
+                padding-bottom: 0.5rem !important;
+
                 font-family: 'Source Sans Pro', sans-serif;
                 font-weight: 700 !important;
                 letter-spacing: 0.5px;
