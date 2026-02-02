@@ -326,7 +326,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
 @st.fragment
 def render_explorer_workspace(selector_type, selected_items):
     #css details
-    accent_line = "<hr style='border: 3px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
+    accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
     c_mid, c_right = st.columns([2, 1])
     
