@@ -1531,6 +1531,13 @@ def inject_custom_css():
                 font-weight: 600 !important; 
             }
 
+            /* Fix for multi-line headers where second line might shrink */
+            /* Forces any children (like spans created by newlines) to match parent header size */
+            h1 *, h2 *, h3 *, h4 *, h5 *, h6 * {
+                font-size: inherit !important;
+                color: inherit !important;
+            }
+
             /* 5. Tighter Dividers */
             hr {
                 border-color: #41444C;
