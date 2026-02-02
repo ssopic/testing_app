@@ -1494,21 +1494,20 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
-            /* Target ALL buttons, including secondary (default) ones which are usually white */
-            div.stButton > button,
-            div.stButton > button:focus,
-            div.stButton > button:active {
+            /* Target ALL buttons. We use 'background' shorthand to nuking any default gradients/images. */
+            div.stButton > button {
                 width: 100%;
-                background-color: #1F2129 !important; /* Force Dark Background */
+                background: #1F2129 !important; /* Force Dark Background (Shorthand) */
+                background-color: #1F2129 !important;
                 color: #FFFFFF !important; 
                 border: 1px solid #41444C !important; /* Force Dark Border */
                 border-radius: 4px;
                 
-                /* SIZE ADJUSTMENT: Matches standard input height */
-                min-height: 45px !important; 
+                /* SIZE ADJUSTMENT: Matches standard input height (approx 42px) */
+                min-height: 42px !important; 
                 height: auto !important;
-                padding-top: 0.5rem !important;
-                padding-bottom: 0.5rem !important;
+                padding-top: 0.25rem !important;
+                padding-bottom: 0.25rem !important;
 
                 font-family: 'Source Sans Pro', sans-serif;
                 font-weight: 700 !important;
@@ -1516,13 +1515,32 @@ def inject_custom_css():
                 transition: all 0.2s ease-in-out; 
                 box-shadow: none !important;
             }
+            
+            /* Force text inside button to be white */
+            div.stButton > button p {
+                color: #FFFFFF !important;
+            }
+
+            /* Focus/Active States */
+            div.stButton > button:focus,
+            div.stButton > button:active {
+                background: #1F2129 !important;
+                color: #FFFFFF !important;
+                border-color: #41444C !important;
+                box-shadow: none !important;
+            }
 
             /* ACCENT: Cyan Border & Text on Hover */
             div.stButton > button:hover {
-                background-color: #1F2129 !important; 
+                background: #1F2129 !important; 
                 border-color: #00ADB5 !important; /* Cyan Accent */     
                 color: #00ADB5 !important;        /* Cyan Text */
                 box-shadow: 0 0 4px rgba(0, 173, 181, 0.3) !important; /* Subtle Glow */          
+            }
+            
+            /* Hover Text Color */
+            div.stButton > button:hover p {
+                color: #00ADB5 !important;
             }
             
             /* 4. GLOBAL TEXT STYLING */
@@ -1531,11 +1549,15 @@ def inject_custom_css():
                 font-weight: 600 !important; 
             }
 
-            /* Fix for multi-line headers where second line might shrink */
-            /* Forces any children (like spans created by newlines) to match parent header size */
-            h1 *, h2 *, h3 *, h4 *, h5 *, h6 * {
+            /* FIX FOR MULTI-LINE HEADERS (st.subheader with \n) */
+            /* Forces <p> tags created by newlines inside headers to match the header size */
+            h1 p, h2 p, h3 p, h4 p, h5 p, h6 p,
+            h1 span, h2 span, h3 span, h4 span, h5 span, h6 span {
                 font-size: inherit !important;
+                font-weight: inherit !important;
                 color: inherit !important;
+                line-height: 1.2 !important; 
+                margin-bottom: 0 !important;
             }
 
             /* 5. Tighter Dividers */
