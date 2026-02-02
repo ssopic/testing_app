@@ -431,7 +431,7 @@ def render_explorer_workspace(selector_type, selected_items):
         
         unique_ids = list(set(all_ids))
         
-        st.metric("Documents Found:", value = len(unique_ids), height="content")
+        st.metric(f"""Documents Found: {len(unique_ids)}""", )
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
 
