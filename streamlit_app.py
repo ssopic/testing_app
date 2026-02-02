@@ -434,7 +434,7 @@ def render_explorer_workspace(selector_type, selected_items):
         st.metric("Documents Found", len(unique_ids))
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
-        st.subheader(divider="gray")
+        st.subheader("",divider="gray")
         if st.button("ADD TO EVIDENCE CART", type="primary", use_container_width=True):
             if not unique_ids:
                 st.error("No documents to add.")
