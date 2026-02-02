@@ -375,8 +375,9 @@ def render_explorer_workspace(selector_type, selected_items):
         st.plotly_chart(fig, use_container_width=True)
 
     with c_right:
-        st.subheader("Extraction")
-        st.caption("Select data to add to Evidence Locker")
+        st.subheader("Add data to")
+        st.subheader("Evidence Cart", divider = "gray")
+        st.caption("Filter by Relationships and Target Types")
 
         # --- UPDATED: Multi-Select Cascading Filters ---
         
@@ -540,12 +541,11 @@ def screen_databook():
 
                 st.divider()
 
-            # 3. Scrollable List Container
-            with st.container(height=400, border=True):
+            # 3. Scrollable List Container (FIXED HEIGHT)
+            with st.container(height=400, border=False):
                 # --- LOGIC FOR LEXICAL (Placeholder) ---
                 if selector_type == "Lexical":
                      st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
-                     # No further logic executes for this branch
 
                 # --- LOGIC FOR OBJECT & VERB ---
                 else:
@@ -573,7 +573,20 @@ def screen_databook():
                                         names = sorted(list(set(str(n) for n in clean_names)))
                                         
                                         if names:
-                                            search_term = st.text_input(f"Search {label}", placeholder="Filter...", key=search_key)
+                                            # UPDATED SEARCH BAR
+                                            # Using [5, 1] ratio for a tighter "icon-like" button
+                                            c_search, c_btn = st.columns([5, 1])
+                                            with c_search:
+                                                search_term = st.text_input(
+                                                    f"Search {label}", 
+                                                    placeholder=f"Filter...", 
+                                                    key=search_key,
+                                                    label_visibility="collapsed"
+                                                )
+                                            with c_btn:
+                                                # Button triggers rerun naturally
+                                                st.button("⏎", key=f"btn_{search_key}",  use_container_width=True)
+
                                             filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
                                             
                                             if not filtered_names:
@@ -603,11 +616,22 @@ def screen_databook():
                                 rel_types = sorted(list(available_data.keys()))
                                 if rel_types:
                                     search_key = f"search_{selector_type}"
-                                    search_term = st.text_input("Search Relationships", placeholder="Filter...", key=search_key)
+                                    
+                                    # UPDATED SEARCH BAR
+                                    c_search, c_btn = st.columns([5, 1])
+                                    with c_search:
+                                        search_term = st.text_input(
+                                            "Search Relationships", 
+                                            placeholder="Filter...", 
+                                            key=search_key,
+                                            label_visibility="collapsed"
+                                        )
+                                    with c_btn:
+                                        st.button("⏎", key=f"btn_{search_key}", help="Apply Filter", use_container_width=True)
+                                    
                                     filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
                                     
                                     for r_type in filtered_rels:
-                                        # Use "Verb" as the label for backend logic
                                         is_selected = ("Verb", r_type) in st.session_state.databook_selections
                                         chk_key = f"chk_verb_{r_type}"
                                         
@@ -624,7 +648,6 @@ def screen_databook():
                             st.error("Invalid inventory format.")
 
     with c_workspace:
-        # Don't try to render workspace for Lexical placeholder
         if selector_type != "Lexical":
             render_explorer_workspace(
                 selector_type, 
@@ -893,6 +916,8 @@ You are a helpful Data Analyst / Investigator. Your goal is to answer the user's
 
 GUIDELINES:
 1. **ANSWER FIRST**: Start immediately with the findings. Do NOT explain the Cypher query structure (e.g., "I matched a Person node...") unless the results are ambiguous and require technical context.
+   - Clearly admit the limitations of the cypher. The database does not allow for filtering on the names of anything other than Persons. If a name of an island or organization is being used, clearly state
+   that it might extract non relevant data as a precaution to make sure that the relevant data is extracted. 
    - YES: "I found 36 individuals who fit the criteria, including..."
    - NO: "The query used a MATCH clause to find..."
 
@@ -1256,40 +1281,7 @@ def show_settings_dialog():
             else:
                 st.error(msg)
 
-#old version. probabbly going to delete
-# def init_app():
-#     """
-#     Runs once on app startup to try auto-login using Secrets/Env Vars.
-#     """
-#     if st.session_state.get("has_tried_login", False):
-#         return
 
-#     # 1. NEW: Setup LangSmith 
-#     # This MUST happen here so the library finds the key when the pipeline runs later
-#     ls_key = get_config("LANGCHAIN_API_KEY") 
-#     if ls_key:
-#         os.environ["LANGCHAIN_API_KEY"] = ls_key
-#         os.environ["LANGCHAIN_TRACING_V2"] = "true"
-#         os.environ["LANGCHAIN_PROJECT"] = "Testing_analysis_tool"
-#         os.environ["LANGCHAIN_ENDPOINT"] = "[https://eu.api.smith.langchain.com](https://eu.api.smith.langchain.com)"
-#     if "app_session_id" not in st.session_state:
-#         st.session_state["app_session_id"] = str(uuid.uuid4())
-
-#     # 2. Get DATABASE and mistral keys
-#     m_key = get_config("MISTRAL_API_KEY")
-#     n_uri = get_config("NEO4J_URI")
-#     n_user = get_config("NEO4J_USER", "neo4j")
-#     n_pass = get_config("NEO4J_PASSWORD")
-
-#     # Only attempt if we actually have credentials
-#     if n_uri and n_pass and m_key:
-#         success, msg = attempt_connection(n_uri, n_user, n_pass, m_key)
-#         if not success:
-#             # Pop-up toast notification of failure (non-intrusive)
-#             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
-    
-#     st.session_state.has_tried_login = True
-# FRAGMENT: Updates only the chat area when interacting
 @st.fragment
 def screen_extraction():
     st.title("🔍 Extraction & Cypher Sandbox")
@@ -1503,31 +1495,70 @@ def inject_custom_css():
             }
 
             /* 3. TECH BUTTON STYLING */
+            /* Target ALL buttons. We use 'background' shorthand to nuking any default gradients/images. */
             div.stButton > button {
                 width: 100%;
-                background-color: #1F2129; 
+                background: #1F2129 !important; /* Force Dark Background (Shorthand) */
+                background-color: #1F2129 !important;
                 color: #FFFFFF !important; 
-                border: 1px solid #41444C;
+                border: 1px solid #41444C !important; /* Force Dark Border */
                 border-radius: 4px;
-                height: 3.5em;
+                
+                /* SIZE ADJUSTMENT: Matches standard input height (approx 42px) */
+                min-height: 42px !important; 
+                height: auto !important;
+                padding-top: 0.25rem !important;
+                padding-bottom: 0.25rem !important;
+
                 font-family: 'Source Sans Pro', sans-serif;
                 font-weight: 700 !important;
                 letter-spacing: 0.5px;
                 transition: all 0.2s ease-in-out; 
+                box-shadow: none !important;
+            }
+            
+            /* Force text inside button to be white */
+            div.stButton > button p {
+                color: #FFFFFF !important;
+            }
+
+            /* Focus/Active States */
+            div.stButton > button:focus,
+            div.stButton > button:active {
+                background: #1F2129 !important;
+                color: #FFFFFF !important;
+                border-color: #41444C !important;
+                box-shadow: none !important;
             }
 
             /* ACCENT: Cyan Border & Text on Hover */
             div.stButton > button:hover {
-                background-color: #1F2129; 
+                background: #1F2129 !important; 
                 border-color: #00ADB5 !important; /* Cyan Accent */     
                 color: #00ADB5 !important;        /* Cyan Text */
-                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3); /* Subtle Glow */          
+                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3) !important; /* Subtle Glow */          
+            }
+            
+            /* Hover Text Color */
+            div.stButton > button:hover p {
+                color: #00ADB5 !important;
             }
             
             /* 4. GLOBAL TEXT STYLING */
             h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown, .stText, .stCaption {
                 color: #FFFFFF !important;
                 font-weight: 600 !important; 
+            }
+
+            /* FIX FOR MULTI-LINE HEADERS (st.subheader with \n) */
+            /* Forces <p> tags created by newlines inside headers to match the header size */
+            h1 p, h2 p, h3 p, h4 p, h5 p, h6 p,
+            h1 span, h2 span, h3 span, h4 span, h5 span, h6 span {
+                font-size: inherit !important;
+                font-weight: inherit !important;
+                color: inherit !important;
+                line-height: 1.2 !important; 
+                margin-bottom: 0 !important;
             }
 
             /* 5. Tighter Dividers */
@@ -1592,21 +1623,6 @@ def inject_custom_css():
                 color: #FFFFFF !important;
             }
             
-            /* ACCENT: Input Focus States */
-            /* Text Input field styling */
-            div[data-baseweb="input"] {
-                background-color: #1F2129 !important;
-                border: 1px solid #41444C !important; 
-            }
-            div[data-baseweb="input"] input {
-                color: #FFFFFF !important;
-            }
-            /* Focus Accent for Inputs */
-            div[data-baseweb="input"]:focus-within {
-                border-color: #00ADB5 !important;
-                box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
-            }
-
             /* 8. MULTISELECT & DROPDOWN LIST FIXES */
 
             /* The Selected Tags (Chips) */
@@ -1751,15 +1767,9 @@ def inject_custom_css():
 
             /* 13. VERTICAL SEPARATION LINES (Column Borders) - DEPTH-BASED SELECTOR */
             
-            /* We target the Top-Level Horizontal Block by limiting the depth from .block-container.
-               Nested blocks (inside other columns) are too deep to match these selectors.
-            */
-
             /* LEFT FRAME (First Column) */
-            /* Covers standard structure: block-container -> vertical-block -> horizontal-block */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
-            /* Compatibility for older/newer testids */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1),
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
                 border-right: 3px solid #00ADB5 !important; 
@@ -1772,7 +1782,6 @@ def inject_custom_css():
             /* RIGHT FRAME (Last Column) */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
-            /* Compatibility */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child,
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
                 border-left: 3px solid #00ADB5 !important;
@@ -1803,7 +1812,7 @@ def inject_custom_css():
             
             /* The Input Field Itself */
             div[data-testid="stTextInput"] input {
-                color: #FFFFFF !important;
+                color: #FFFFFF !important;  
                 background-color: #1F2129 !important;
                 caret-color: #00ADB5 !important; /* Cyan caret */
             }
