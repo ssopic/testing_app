@@ -1751,26 +1751,33 @@ def inject_custom_css():
 
             /* 13. VERTICAL SEPARATION LINES (Column Borders) - EXTREME VISIBILITY */
             
+            /* Targeting both [data-testid="column"] (old) and [data-testid="stColumn"] (new)
+               to ensure compatibility.
+            */
+
             /* Left Column: Cyan Border + Glow + Background */
-            div[data-testid="column"]:nth-of-type(1) {
+            div[data-testid="column"]:nth-of-type(1),
+            div[data-testid="stColumn"]:nth-of-type(1) {
                 border-right: 3px solid #00ADB5 !important; 
-                background-color: #14171F; /* Slightly lighter than main bg to act as panel */
+                background-color: #14171F; /* Panel Background */
                 padding: 1rem !important;
-                min-height: 70vh; /* Force height to look like a sidebar */
-                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow into main area */
+                min-height: 85vh; /* Force height to bottom of screen */
+                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow right */
             }
             
             /* Right Column: Cyan Border + Glow + Background */
-            div[data-testid="column"]:last-child {
+            div[data-testid="column"]:last-child,
+            div[data-testid="stColumn"]:last-child {
                 border-left: 3px solid #00ADB5 !important;
                 background-color: #14171F;
                 padding: 1rem !important;
-                min-height: 70vh;
-                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow into main area */
+                min-height: 85vh;
+                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); /* Glow left */
             }
             
-            /* Reset for single columns (so we don't break simple layouts) */
-            div[data-testid="column"]:only-child {
+            /* Reset for single/nested columns to prevent layout breakage inside the app */
+            div[data-testid="column"]:only-child,
+            div[data-testid="stColumn"]:only-child {
                 border: none !important;
                 background-color: transparent !important;
                 box-shadow: none !important;
