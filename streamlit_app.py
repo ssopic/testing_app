@@ -1748,6 +1748,26 @@ def inject_custom_css():
             button[aria-label="Close"]:hover {
                 color: #00ADB5 !important;
             }
+
+            /* 13. VERTICAL SEPARATION LINES (Column Borders) */
+            
+            /* Add a subtle line to separate the Left Column (Input) */
+            div[data-testid="column"]:nth-of-type(1) {
+                border-right: 1px solid #41444C;
+                padding-right: 1rem;
+            }
+            
+            /* Add a subtle line to separate the Right Column (Output) */
+            div[data-testid="column"]:last-child {
+                border-left: 1px solid #41444C;
+                padding-left: 1rem;
+            }
+            
+            /* Remove borders for single-column layouts to avoid weirdness */
+            div[data-testid="column"]:only-child {
+                border: none !important;
+                padding: 0 !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
