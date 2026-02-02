@@ -427,8 +427,6 @@ def render_explorer_workspace(selector_type, selected_items):
 
         st.divider()
         if st.button("ADD TO EVIDENCE CART", type="primary", use_container_width=True):
-        st.divider()
-
             if not unique_ids:
                 st.error("No documents to add.")
             else:
@@ -465,6 +463,7 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
+        st.divider()
 
                 all_ids = []
         if 'id_list' in final_filtered_df.columns:
