@@ -541,7 +541,7 @@ def screen_databook():
                 st.divider()
 
             # 3. Scrollable List Container
-            with st.container(height=600, border=False):
+            with st.container(height=400, border=True):
                 # --- LOGIC FOR LEXICAL (Placeholder) ---
                 if selector_type == "Lexical":
                      st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
