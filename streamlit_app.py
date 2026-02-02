@@ -425,7 +425,7 @@ def render_explorer_workspace(selector_type, selected_items):
                 elif pd.notna(i) and i != "":
                     yield str(i)
 
-        st.divider()
+
         if st.button("ADD TO EVIDENCE CART", type="primary", use_container_width=True):
 
             if not unique_ids:
