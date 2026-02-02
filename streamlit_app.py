@@ -1716,6 +1716,38 @@ def inject_custom_css():
                 color: #00ADB5 !important; /* Cyan for raw text logs */
                 font-family: 'Courier New', monospace !important;
             }
+
+            /* 12. SETTINGS DIALOG (MODAL) FIXES */
+
+            /* The Modal Background (The popup box itself) */
+            div[role="dialog"][aria-modal="true"] {
+                background-color: #1F2129 !important;
+                border: 1px solid #41444C !important;
+                color: #FFFFFF !important;
+            }
+
+            /* Modal Header */
+            div[role="dialog"] header {
+                background-color: #1F2129 !important;
+                color: #FFFFFF !important;
+            }
+
+            /* Content Text inside Modal */
+            div[role="dialog"] div, 
+            div[role="dialog"] label,
+            div[role="dialog"] p {
+                color: #FFFFFF !important;
+            }
+
+            /* Close Button (X) */
+            button[aria-label="Close"] {
+                color: #FFFFFF !important;
+                background-color: transparent !important;
+                border: none !important;
+            }
+            button[aria-label="Close"]:hover {
+                color: #00ADB5 !important;
+            }
         </style>
         """,
         unsafe_allow_html=True
