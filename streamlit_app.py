@@ -324,122 +324,160 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
         driver.close()
 
 @st.fragment
-def render_explorer_workspace():
-    """Renders the main explorer workspace with hierarchical filtering and document list."""
-    # Custom HTML for the accent line to highlight primary action
-    accent_line = "<hr style='border: 1px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
+def render_explorer_workspace(selector_type, selected_items):
+    c_mid, c_right = st.columns([2, 1])
+    
+    with c_mid:
+        if not selected_items:
+            st.info("👈 Select entities from the left and click 'Visualize'.")
+            return
 
-    c_left, c_right = st.columns([0.75, 0.25], gap="large")
+        names = [item['name'] for item in selected_items]
+        st.subheader(f"Analysis: {len(names)} Items")
 
-    with c_left:
-        st.markdown("### 🔍 Knowledge Explorer")
+        # Fetch Data
+        df = fetch_sunburst_data(selector_type, selected_items)
+
+        if df.empty:
+            st.warning("No data found.")
+            return
+
+        # Prepare Plotly Data
+        if 'id_list' in df.columns:
+            df['id_list_str'] = df['id_list'].astype(str)
+            hover_cols = ['id_list_str']
+        else:
+            hover_cols = None
+
+        # --- DYNAMIC HIERARCHY BASED ON TYPE ---
+        if selector_type == "Verb":
+            # Hierarchy: Edge Type -> Source Label -> Target Label
+            path = ['edge', 'source_node_label', 'connected_node_label']
+        else:
+            # Hierarchy: Node Name -> Edge Type -> Target Label
+            path = ['node_name', 'edge', 'connected_node_label']
+
+        # Ensure columns exist before plotting
+        valid_path = [col for col in path if col in df.columns]
         
-        # 1. Selection logic
-        df = st.session_state.master_df
-        current_selection = {}
-        
-        # Display the breadcrumbs/active filters
-        if st.session_state.selection_path:
-            path_str = " > ".join([f"**{v}**" for k, v in st.session_state.selection_path.items()])
-            st.info(f"Viewing: {path_str}")
-            
-            if st.button("Reset Filters", type="secondary"):
-                st.session_state.selection_path = {}
-                st.rerun()
+        if not valid_path:
+             st.error("Data columns missing for visualization.")
+             return
 
-        # 2. Hierarchy Navigation
-        levels = ["Category", "Subcategory", "Topic"]
-        cols = st.columns(len(levels))
-        
-        filtered_df = df.copy()
-        
-        for i, level in enumerate(levels):
-            # Apply previous filters
-            for prev_level in levels[:i]:
-                if prev_level in st.session_state.selection_path:
-                    filtered_df = filtered_df[filtered_df[prev_level] == st.session_state.selection_path[prev_level]]
-            
-            options = ["All"] + sorted(filtered_df[level].unique().tolist())
-            current_val = st.session_state.selection_path.get(level, "All")
-            
-            # Find index of current value
-            idx = options.index(current_val) if current_val in options else 0
-            
-            with cols[i]:
-                selected = st.selectbox(f"Select {level}", options, index=idx, key=f"sel_{level}")
-                if selected != "All":
-                    st.session_state.selection_path[level] = selected
-                    # Clear deeper filters if a higher one changes
-                    for deeper in levels[i+1:]:
-                        st.session_state.selection_path.pop(deeper, None)
-                elif level in st.session_state.selection_path:
-                    st.session_state.selection_path.pop(level)
-
-        # Final filtered view
-        final_df = filtered_df.copy()
-        for k, v in st.session_state.selection_path.items():
-            final_df = final_df[final_df[k] == v]
-
-        st.divider()
-
-        # 3. Search and Document List
-        search_query = st.text_input("Search within these results...", placeholder="Type keywords...")
-        
-        if search_query:
-            final_df = final_df[
-                final_df['Title'].str.contains(search_query, case=False) | 
-                final_df['Preview'].str.contains(search_query, case=False)
-            ]
-
-        st.write(f"Showing **{len(final_df)}** relevant documents")
-
-        # Document display loop
-        for idx, row in final_df.iterrows():
-            with st.container(border=True):
-                col_text, col_action = st.columns([0.85, 0.15])
-                with col_text:
-                    st.markdown(f"**{row['Title']}**")
-                    st.caption(f"{row['Category']} | {row['Subcategory']}")
-                    st.write(row['Preview'])
-                with col_action:
-                    # Individual document check
-                    is_in_locker = any(item['Title'] == row['Title'] for item in st.session_state.evidence_locker)
-                    if st.button("Add", key=f"add_{idx}", disabled=is_in_locker, use_container_width=True):
-                        st.session_state.evidence_locker.append(row.to_dict())
-                        st.toast(f"Added: {row['Title']}")
-                        st.rerun()
+        fig = px.sunburst(
+            df, 
+            path=valid_path, 
+            values='count',
+            color='edge' if 'edge' in df.columns else None,
+            hover_data=hover_cols
+        )
+        fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
+        st.plotly_chart(fig, use_container_width=True)
 
     with c_right:
-        st.markdown("### 🛒 Actions")
-        st.write(f"Items in focus: **{len(final_df)}**")
+        st.subheader("Filter Data", divider = "gray")
+        st.caption("Filter by Relationships and Target Types")
+
+        # --- UPDATED: Multi-Select Cascading Filters ---
         
-        # Adding horizontal lines around the primary button
-        st.markdown(accent_line, unsafe_allow_html=True)
+        # 1. Edge Filter (Multi)
+        edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         
-        if st.button("Add All to Evidence Cart", type="primary", use_container_width=True):
-            new_count = 0
-            for _, row in final_df.iterrows():
-                if not any(item['Title'] == row['Title'] for item in st.session_state.evidence_locker):
-                    st.session_state.evidence_locker.append(row.to_dict())
-                    new_count += 1
-            if new_count > 0:
-                st.success(f"Added {new_count} new documents to your locker!")
-                time.sleep(1)
-                st.rerun()
+        selected_edges = st.multiselect(
+            "Filter by Relationship:",
+            options=edge_options,
+            default=[], # Empty implies "All"
+            placeholder="Select relationships (Empty = All)",
+            key="filter_edge_multi"
+        )
+
+        # 2. Target Label Filter (Multi)
+        # Determine valid target labels based on edge selection
+        if not selected_edges:
+            # If no specific edges selected, use all data for target options
+            filtered_df_step1 = df
+        else:
+            # FIX: Use .isin() for list comparison
+            filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+            
+        target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
+
+        selected_targets = st.multiselect(
+            "Filter by Target Type:",
+            options=target_options,
+            default=[], # Empty implies "All"
+            placeholder="Select target types (Empty = All)",
+            key="filter_target_multi"
+        )
+
+        # 3. Apply Final Filter
+        if not selected_targets:
+            final_filtered_df = filtered_df_step1
+        else:
+            # FIX: Use .isin() for list comparison
+            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+
+        # 4. Flatten IDs
+        def deep_flatten(container):
+            for i in container:
+                if isinstance(i, list):
+                    yield from deep_flatten(i)
+                elif pd.notna(i) and i != "":
+                    yield str(i)
+
+        all_ids = []
+        if 'id_list' in final_filtered_df.columns:
+            all_ids = list(deep_flatten(final_filtered_df['id_list']))
+        
+        unique_ids = list(set(all_ids))
+        string = "Documents Found: " + str(len(unique_ids)) 
+        st.text(string)
+        with st.expander("Preview ID List", expanded=False):
+            st.write(unique_ids)
+
+
+
+        if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
+            if not unique_ids:
+                st.error("No documents to add.")
             else:
-                st.info("All selected documents are already in your locker.")
+                # Construct query description
+                if len(names) > 1:
+                    if selector_type == "Verb":
+                        name_str = f"Verbs: {', '.join(names)}"
+                    else:
+                        name_str = f"Entities: {', '.join(names)}"
+                else:
+                    name_str = names[0]
+                    
+                query_desc = f"Manual Explorer: {name_str}"
+                filters = []
+                
+                # Logic to describe filters: "All" or list of items
+                if selected_edges:
+                    filters.append(f"Edges: {', '.join(selected_edges)}")
+                
+                if selected_targets:
+                    filters.append(f"Targets: {', '.join(selected_targets)}")
+                
+                if filters:
+                    query_desc += f" ({'; '.join(filters)})"
 
-        st.markdown(accent_line, unsafe_allow_html=True)
-
-        # Stats or info box
-        with st.expander("Workspace Tips", expanded=True):
-            st.info("""
-            1. Use the dropdowns to drill down into topics.
-            2. Search works against titles and previews.
-            3. Use the 'Add' buttons to collect evidence for analysis.
-            """)
+                payload = {
+                    "query": query_desc,
+                    "answer": f"Visual discovery found {len(unique_ids)} related documents.",
+                    "ids": [str(uid) for uid in unique_ids]
+                }
+                
+                if "evidence_locker" not in st.session_state.app_state:
+                    st.session_state.app_state["evidence_locker"] = []
+                    
+                st.session_state.app_state["evidence_locker"].append(payload)
+                st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
+                
+        current_count = len(st.session_state.app_state.get("evidence_locker", []))
+        st.caption(f"Total items in Locker: {current_count}")
         
-        st.metric("Locker Count", len(st.session_state.evidence_locker))
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
 # ==========================================
@@ -1794,7 +1832,7 @@ def inject_custom_css():
         """,
         unsafe_allow_html=True
     )
-
+    
 def set_page(page_name):
     """Helper to update the current page in session state."""
     st.session_state.current_page = page_name
@@ -1890,3 +1928,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
