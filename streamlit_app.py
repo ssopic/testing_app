@@ -1494,9 +1494,9 @@ def inject_custom_css():
             /* 3. TECH BUTTON STYLING */
             div.stButton > button {
                 width: 100%;
-                background-color: #1F2129; 
+                background-color: #1F2129 !important; /* Force Dark Background */
                 color: #FFFFFF !important; 
-                border: 1px solid #41444C;
+                border: 1px solid #41444C !important; /* Force Dark Border */
                 border-radius: 4px;
                 height: 3.5em;
                 font-family: 'Source Sans Pro', sans-serif;
@@ -1507,7 +1507,7 @@ def inject_custom_css():
 
             /* ACCENT: Cyan Border & Text on Hover */
             div.stButton > button:hover {
-                background-color: #1F2129; 
+                background-color: #1F2129 !important; 
                 border-color: #00ADB5 !important; /* Cyan Accent */     
                 color: #00ADB5 !important;        /* Cyan Text */
                 box-shadow: 0 0 4px rgba(0, 173, 181, 0.3); /* Subtle Glow */          
@@ -1581,21 +1581,6 @@ def inject_custom_css():
                 color: #FFFFFF !important;
             }
             
-            /* ACCENT: Input Focus States */
-            /* Text Input field styling */
-            div[data-baseweb="input"] {
-                background-color: #1F2129 !important;
-                border: 1px solid #41444C !important; 
-            }
-            div[data-baseweb="input"] input {
-                color: #FFFFFF !important;
-            }
-            /* Focus Accent for Inputs */
-            div[data-baseweb="input"]:focus-within {
-                border-color: #00ADB5 !important;
-                box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
-            }
-
             /* 8. MULTISELECT & DROPDOWN LIST FIXES */
 
             /* The Selected Tags (Chips) */
@@ -1740,15 +1725,9 @@ def inject_custom_css():
 
             /* 13. VERTICAL SEPARATION LINES (Column Borders) - DEPTH-BASED SELECTOR */
             
-            /* We target the Top-Level Horizontal Block by limiting the depth from .block-container.
-               Nested blocks (inside other columns) are too deep to match these selectors.
-            */
-
             /* LEFT FRAME (First Column) */
-            /* Covers standard structure: block-container -> vertical-block -> horizontal-block */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
-            /* Compatibility for older/newer testids */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1),
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
                 border-right: 3px solid #00ADB5 !important; 
@@ -1761,7 +1740,6 @@ def inject_custom_css():
             /* RIGHT FRAME (Last Column) */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
-            /* Compatibility */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child,
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
                 border-left: 3px solid #00ADB5 !important;
@@ -1792,7 +1770,7 @@ def inject_custom_css():
             
             /* The Input Field Itself */
             div[data-testid="stTextInput"] input {
-                color: #FFFFFF !important;
+                color: #FFFFFF !important;  
                 background-color: #1F2129 !important;
                 caret-color: #00ADB5 !important; /* Cyan caret */
             }
