@@ -377,7 +377,7 @@ def render_explorer_workspace(selector_type, selected_items):
     with c_right:
         st.subheader("Add data to")
         st.subheader("Evidence Cart", divider = "gray")
-        st.caption("Filter by Relationships and Entity Types")
+        st.caption("Filter by Relationships and Target Types")
 
         # --- UPDATED: Multi-Select Cascading Filters ---
         
