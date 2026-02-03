@@ -1470,6 +1470,10 @@ def screen_analysis():
     data_valid = False
     
     if has_chain_col:
+        # Debug information requested
+        st.caption(f"Debug - Column Type: {df['chain_sequence_order'].dtype}")
+        st.caption(f"Debug - Unique Values: {df['chain_sequence_order'].unique()}")
+        
         unique_pks = set(df["PK"].unique())
         # Get PKs where sequence order is present (not NaN)
         pks_with_chain = set(df[df["chain_sequence_order"].notna()]["PK"].unique())
