@@ -117,7 +117,7 @@ def fetch_inventory_from_db():
                 # For relationships, we might not have a "name", so we leave the list empty 
                 # or we could fetch distinct properties if your schema supports it.
                 # This ensures the 'Verb' menu at least shows the types.
-                inventory["Relationships"][r_type] = [] 
+                inventory["Connections"][r_type] = [] 
 
             # 3. POPULATE LEXICAL
             # Assuming 'MENTIONED_IN' or similar for lexical graph
