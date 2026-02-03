@@ -144,7 +144,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
     try:
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
-            if label == "Verb":
+            if label == "Connections":
                 # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
                 # We want to see: Edge Type -> Source Label -> Target Label
                 # We use string manipulation to inject types safely because Cypher params can't handle dynamic types easily in this specific aggregation way
@@ -448,8 +448,8 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 # Construct query description
                 if len(names) > 1:
-                    if selector_type == "Verb":
-                        name_str = f"Verbs: {', '.join(names)}"
+                    if selector_type == "Connections":
+                        name_str = f"Connections: {', '.join(names)}"
                     else:
                         name_str = f"Entities: {', '.join(names)}"
                 else:
@@ -643,13 +643,13 @@ def screen_databook():
                                         
                                         def update_verb_selection(t=r_type, k=chk_key):
                                             if st.session_state[k]:
-                                                st.session_state.databook_selections.add(("Verb", t))
+                                                st.session_state.databook_selections.add(("Connections", t))
                                             else:
-                                                st.session_state.databook_selections.discard(("Verb", t))
+                                                st.session_state.databook_selections.discard(("Connection", t))
                                         
                                         st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
                                 else:
-                                    st.caption("No relationship types found.")
+                                    st.caption("No Connection types found.")
                         else:
                             st.error("Invalid inventory format.")
 
