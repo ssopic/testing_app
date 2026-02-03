@@ -353,7 +353,7 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_cols = None
 
         # --- DYNAMIC HIERARCHY BASED ON TYPE ---
-        if selector_type == "Verb":
+        if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
         else:
@@ -387,10 +387,10 @@ def render_explorer_workspace(selector_type, selected_items):
         edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         
         selected_edges = st.multiselect(
-            "Filter by Relationship:",
+            "Filter by Connection Type:",
             options=edge_options,
             default=[], # Empty implies "All"
-            placeholder="Select relationships (Empty = All)",
+            placeholder="Select connection types (Empty = All)",
             key="filter_edge_multi"
         )
 
