@@ -325,6 +325,9 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
 
 @st.fragment
 def render_explorer_workspace(selector_type, selected_items):
+    #css details
+    accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
+
     c_mid, c_right = st.columns([2, 1])
     
     with c_mid:
@@ -435,8 +438,10 @@ def render_explorer_workspace(selector_type, selected_items):
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
 
-
-
+        # accent line
+        st.markdown(accent_line, unsafe_allow_html=True)
+        st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
+        
         if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
             if not unique_ids:
                 st.error("No documents to add.")
@@ -474,7 +479,7 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
-                
+
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
         st.caption(f"Total items in Locker: {current_count}")
         
@@ -1928,3 +1933,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
