@@ -223,7 +223,7 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
-    prefix_map = {"Object": "node", "Verb": "relationship", "Lexical": "lexical"}
+    prefix_map = {"Entities": "node", "Relationship": "relationship", "Text Mentions": "lexical"}
     file_prefix = prefix_map.get(selector_type, "node")
 
     dfs = []
@@ -284,7 +284,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
     try:
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
-            if label == "Verb":
+            if label == "Relationships":
                 # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
                 query = """
                 MATCH (n)-[r]->(m)
