@@ -638,7 +638,7 @@ def screen_databook():
                                     filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
                                     
                                     for r_type in filtered_rels:
-                                        is_selected = ("Verb", r_type) in st.session_state.databook_selections
+                                        is_selected = ("Connections", r_type) in st.session_state.databook_selections
                                         chk_key = f"chk_verb_{r_type}"
                                         
                                         def update_verb_selection(t=r_type, k=chk_key):
