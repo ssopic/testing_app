@@ -90,7 +90,7 @@ def get_db_driver():
 
 def fetch_inventory_from_db():
     """Fallback: Generates the inventory dict by querying the live DB."""
-    inventory = {"Entities": {}, "Verb": {}, "Lexical": {}}
+    inventory = {"Entities": {}, "Connections": {}, "Text Mentions": {}}
     driver = get_db_driver()
     
     if not driver:
@@ -223,7 +223,7 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
-    prefix_map = {"Entities": "node", "Relationship": "relationship", "Text Mentions": "lexical"}
+    prefix_map = {"Entities": "node", "Connections": "relationship", "Text Mentions": "lexical"}
     file_prefix = prefix_map.get(selector_type, "node")
 
     dfs = []
