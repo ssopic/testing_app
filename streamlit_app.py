@@ -618,7 +618,7 @@ def screen_databook():
                                             st.caption("No names.")
 
                             # --- VERB MODE ---
-                            elif selector_type == "Relationships":
+                            elif selector_type == "Connections":
                                 rel_types = sorted(list(available_data.keys()))
                                 if rel_types:
                                     search_key = f"search_{selector_type}"
