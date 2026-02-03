@@ -284,7 +284,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
     try:
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
-            if label == "Relationships":
+            if label == "Connections":
                 # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
                 query = """
                 MATCH (n)-[r]->(m)
