@@ -530,7 +530,7 @@ def screen_databook():
             st.divider()
 
             # 2. Controls: Visualize & Clear (Only show if NOT Lexical)
-            if selector_type != "Lexical":
+            if selector_type != "Text Mentions":
                 selection_count = len(st.session_state.databook_selections)
                 
                 c_vis, c_clear = st.columns([2, 1])
@@ -550,7 +550,7 @@ def screen_databook():
             # 3. Scrollable List Container (FIXED HEIGHT)
             with st.container(height=400, border=False):
                 # --- LOGIC FOR LEXICAL (Placeholder) ---
-                if selector_type == "Lexical":
+                if selector_type == "Text Mentions":
                      st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
 
                 # --- LOGIC FOR OBJECT & VERB ---
