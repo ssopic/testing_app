@@ -703,7 +703,7 @@ def load_github_data():
         df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         return df
     except Exception as e:
-        return pd.DataFrame(columns=['PK', 'details'])
+        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body","chain_sequence_order"])
 
 # --- SCHEMA DEFINITIONS (Preserved from Old Version) ---
 
