@@ -90,7 +90,7 @@ def get_db_driver():
 
 def fetch_inventory_from_db():
     """Fallback: Generates the inventory dict by querying the live DB."""
-    inventory = {"Object": {}, "Verb": {}, "Lexical": {}}
+    inventory = {"Entities": {}, "Connections": {}, "Text Mentions": {}}
     driver = get_db_driver()
     
     if not driver:
@@ -106,7 +106,7 @@ def fetch_inventory_from_db():
                 q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name"
                 names = [r["name"] for r in session.run(q)]
                 if names:
-                    inventory["Object"][label] = sorted(names)
+                    inventory["Entities"][label] = sorted(names)
 
             # 2. POPULATE VERBS (Relationships)
             # We list the Relationship Types as the "Labels"
@@ -117,12 +117,12 @@ def fetch_inventory_from_db():
                 # For relationships, we might not have a "name", so we leave the list empty 
                 # or we could fetch distinct properties if your schema supports it.
                 # This ensures the 'Verb' menu at least shows the types.
-                inventory["Verb"][r_type] = [] 
+                inventory["Connections"][r_type] = [] 
 
             # 3. POPULATE LEXICAL
             # Assuming 'MENTIONED_IN' or similar for lexical graph
             # We can just initialize it or check if specific nodes exist
-            inventory["Lexical"]["Document"] = []
+            inventory["Text Mentions"]["Document"] = []
 
     except Exception as e:
         st.warning(f"DB Fallback failed: {e}")
@@ -144,7 +144,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
     try:
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
-            if label == "Verb":
+            if label == "Connections":
                 # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
                 # We want to see: Edge Type -> Source Label -> Target Label
                 # We use string manipulation to inject types safely because Cypher params can't handle dynamic types easily in this specific aggregation way
@@ -223,7 +223,7 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     base_url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/"
-    prefix_map = {"Object": "node", "Verb": "relationship", "Lexical": "lexical"}
+    prefix_map = {"Entities": "node", "Connections": "relationship", "Text Mentions": "lexical"}
     file_prefix = prefix_map.get(selector_type, "node")
 
     dfs = []
@@ -284,7 +284,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
     try:
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
-            if label == "Verb":
+            if label == "Connections":
                 # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
                 query = """
                 MATCH (n)-[r]->(m)
@@ -332,7 +332,7 @@ def render_explorer_workspace(selector_type, selected_items):
     
     with c_mid:
         if not selected_items:
-            st.info("👈 Select entities from the left and click 'Visualize'.")
+            st.info("👈 Select entities from the left and click 'Show Data'.")
             return
 
         names = [item['name'] for item in selected_items]
@@ -353,7 +353,7 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_cols = None
 
         # --- DYNAMIC HIERARCHY BASED ON TYPE ---
-        if selector_type == "Verb":
+        if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
         else:
@@ -387,10 +387,10 @@ def render_explorer_workspace(selector_type, selected_items):
         edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         
         selected_edges = st.multiselect(
-            "Filter by Relationship:",
+            "Filter by Connection Type:",
             options=edge_options,
             default=[], # Empty implies "All"
-            placeholder="Select relationships (Empty = All)",
+            placeholder="Select connection types (Empty = All)",
             key="filter_edge_multi"
         )
 
@@ -448,8 +448,8 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 # Construct query description
                 if len(names) > 1:
-                    if selector_type == "Verb":
-                        name_str = f"Verbs: {', '.join(names)}"
+                    if selector_type == "Connections":
+                        name_str = f"Connections: {', '.join(names)}"
                     else:
                         name_str = f"Entities: {', '.join(names)}"
                 else:
@@ -501,7 +501,7 @@ def screen_databook():
 
     # Initialize last selector type to detect tab switches
     if "last_selector_type" not in st.session_state:
-        st.session_state.last_selector_type = "Object"
+        st.session_state.last_selector_type = "Entities"
 
     if not inventory:
         st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
@@ -515,7 +515,7 @@ def screen_databook():
             # 1. Mode Selection
             selector_type = st.radio(
                 "Analysis Mode", 
-                ["Object", "Verb", "Lexical"], 
+                ["Entities", "Connections", "Text Mentions"], 
                 captions=["Node-Centric", "Relationship-Centric", "Text-Mentions"],
                 horizontal=True
             )
@@ -530,12 +530,12 @@ def screen_databook():
             st.divider()
 
             # 2. Controls: Visualize & Clear (Only show if NOT Lexical)
-            if selector_type != "Lexical":
+            if selector_type != "Text Mentions":
                 selection_count = len(st.session_state.databook_selections)
                 
                 c_vis, c_clear = st.columns([2, 1])
                 with c_vis:
-                    if st.button(f"Visualize ({selection_count})", type="primary", use_container_width=True):
+                    if st.button(f"Show Data({selection_count})", type="primary", use_container_width=True):
                         st.session_state.active_explorer_items = [
                             {'label': l, 'name': n} for l, n in st.session_state.databook_selections
                         ]
@@ -550,7 +550,7 @@ def screen_databook():
             # 3. Scrollable List Container (FIXED HEIGHT)
             with st.container(height=400, border=False):
                 # --- LOGIC FOR LEXICAL (Placeholder) ---
-                if selector_type == "Lexical":
+                if selector_type == "Text Mentions":
                      st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
 
                 # --- LOGIC FOR OBJECT & VERB ---
@@ -562,7 +562,7 @@ def screen_databook():
                     else:
                         if isinstance(available_data, dict):
                             # --- OBJECT MODE ---
-                            if selector_type == "Object":
+                            if selector_type == "Entities":
                                 labels = sorted(list(available_data.keys()))
                                 for label in labels:
                                     search_key = f"search_{selector_type}_{label}"
@@ -618,7 +618,7 @@ def screen_databook():
                                             st.caption("No names.")
 
                             # --- VERB MODE ---
-                            elif selector_type == "Verb":
+                            elif selector_type == "Connections":
                                 rel_types = sorted(list(available_data.keys()))
                                 if rel_types:
                                     search_key = f"search_{selector_type}"
@@ -638,23 +638,23 @@ def screen_databook():
                                     filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
                                     
                                     for r_type in filtered_rels:
-                                        is_selected = ("Verb", r_type) in st.session_state.databook_selections
+                                        is_selected = ("Connections", r_type) in st.session_state.databook_selections
                                         chk_key = f"chk_verb_{r_type}"
                                         
                                         def update_verb_selection(t=r_type, k=chk_key):
                                             if st.session_state[k]:
-                                                st.session_state.databook_selections.add(("Verb", t))
+                                                st.session_state.databook_selections.add(("Connections", t))
                                             else:
-                                                st.session_state.databook_selections.discard(("Verb", t))
+                                                st.session_state.databook_selections.discard(("Connection", t))
                                         
                                         st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
                                 else:
-                                    st.caption("No relationship types found.")
+                                    st.caption("No Connection types found.")
                         else:
                             st.error("Invalid inventory format.")
 
     with c_workspace:
-        if selector_type != "Lexical":
+        if selector_type != "Text Mentions":
             render_explorer_workspace(
                 selector_type, 
                 st.session_state.active_explorer_items
