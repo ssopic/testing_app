@@ -501,7 +501,7 @@ def screen_databook():
 
     # Initialize last selector type to detect tab switches
     if "last_selector_type" not in st.session_state:
-        st.session_state.last_selector_type = "Object"
+        st.session_state.last_selector_type = "Entities"
 
     if not inventory:
         st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
@@ -515,7 +515,7 @@ def screen_databook():
             # 1. Mode Selection
             selector_type = st.radio(
                 "Analysis Mode", 
-                ["Object", "Verb", "Lexical"], 
+                ["Entities", "Connections", "Text Mentions"], 
                 captions=["Node-Centric", "Relationship-Centric", "Text-Mentions"],
                 horizontal=True
             )
@@ -562,7 +562,7 @@ def screen_databook():
                     else:
                         if isinstance(available_data, dict):
                             # --- OBJECT MODE ---
-                            if selector_type == "Object":
+                            if selector_type == "Entities":
                                 labels = sorted(list(available_data.keys()))
                                 for label in labels:
                                     search_key = f"search_{selector_type}_{label}"
@@ -618,7 +618,7 @@ def screen_databook():
                                             st.caption("No names.")
 
                             # --- VERB MODE ---
-                            elif selector_type == "Verb":
+                            elif selector_type == "Relationships":
                                 rel_types = sorted(list(available_data.keys()))
                                 if rel_types:
                                     search_key = f"search_{selector_type}"
@@ -654,7 +654,7 @@ def screen_databook():
                             st.error("Invalid inventory format.")
 
     with c_workspace:
-        if selector_type != "Lexical":
+        if selector_type != "Text Mentions":
             render_explorer_workspace(
                 selector_type, 
                 st.session_state.active_explorer_items
