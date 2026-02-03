@@ -332,7 +332,7 @@ def render_explorer_workspace(selector_type, selected_items):
     
     with c_mid:
         if not selected_items:
-            st.info("👈 Select entities from the left and click 'Visualize'.")
+            st.info("👈 Select entities from the left and click 'Show Data'.")
             return
 
         names = [item['name'] for item in selected_items]
@@ -535,7 +535,7 @@ def screen_databook():
                 
                 c_vis, c_clear = st.columns([2, 1])
                 with c_vis:
-                    if st.button(f"Visualize ({selection_count})", type="primary", use_container_width=True):
+                    if st.button(f"Show Data({selection_count})", type="primary", use_container_width=True):
                         st.session_state.active_explorer_items = [
                             {'label': l, 'name': n} for l, n in st.session_state.databook_selections
                         ]
