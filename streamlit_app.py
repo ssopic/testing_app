@@ -90,7 +90,7 @@ def get_db_driver():
 
 def fetch_inventory_from_db():
     """Fallback: Generates the inventory dict by querying the live DB."""
-    inventory = {"Object": {}, "Verb": {}, "Lexical": {}}
+    inventory = {"Entities": {}, "Verb": {}, "Lexical": {}}
     driver = get_db_driver()
     
     if not driver:
@@ -106,7 +106,7 @@ def fetch_inventory_from_db():
                 q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name"
                 names = [r["name"] for r in session.run(q)]
                 if names:
-                    inventory["Object"][label] = sorted(names)
+                    inventory["Entities"][label] = sorted(names)
 
             # 2. POPULATE VERBS (Relationships)
             # We list the Relationship Types as the "Labels"
@@ -117,12 +117,12 @@ def fetch_inventory_from_db():
                 # For relationships, we might not have a "name", so we leave the list empty 
                 # or we could fetch distinct properties if your schema supports it.
                 # This ensures the 'Verb' menu at least shows the types.
-                inventory["Verb"][r_type] = [] 
+                inventory["Relationships"][r_type] = [] 
 
             # 3. POPULATE LEXICAL
             # Assuming 'MENTIONED_IN' or similar for lexical graph
             # We can just initialize it or check if specific nodes exist
-            inventory["Lexical"]["Document"] = []
+            inventory["Text Mentions"]["Document"] = []
 
     except Exception as e:
         st.warning(f"DB Fallback failed: {e}")
