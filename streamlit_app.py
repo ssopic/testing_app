@@ -1449,30 +1449,72 @@ def screen_locker():
 @st.fragment
 def screen_analysis():
     st.title("🔬 Analysis Pane")
-    ids = list(st.session_state.app_state["selected_ids"])
+    
+    # Retrieve selected IDs safely
+    ids = list(st.session_state.app_state.get("selected_ids", []))
     
     if not ids:
         st.warning("No documents selected.")
         return
-        
+    
+    # Get the main dataframe
     df = st.session_state.github_data
+
+    # --- REFACTORING START: Chain Sequence Logic ---
+    
+    # 1. Test: Check if the column exists
+    has_chain_col = "chain_sequence_order" in df.columns
+    
+    # 2. Test: Check if all unique PKs have a valid chain_sequence_order
+    # Logic: Compare the Set of ALL PKs vs. the Set of PKs where sequence is NOT NULL
+    data_valid = False
+    
+    if has_chain_col:
+        unique_pks = set(df["PK"].unique())
+        # Get PKs where sequence order is present (not NaN)
+        pks_with_chain = set(df[df["chain_sequence_order"].notna()]["PK"].unique())
+        
+        # Validation: Sets must match exactly
+        if unique_pks == pks_with_chain and len(unique_pks) > 0:
+            data_valid = True
+
+    # 3. Apply Filter (if tests passed)
+    if data_valid:
+        # A. Sort by chain_sequence_order descending (Highest first)
+        df_sorted = df.sort_values(by="chain_sequence_order", ascending=False)
+        
+        # B. Drop duplicates on PK, keeping the 'first' (which is now the highest order)
+        df_clean = df_sorted.drop_duplicates(subset=["PK"], keep="first")
+        
+        st.caption(f"✅ Sequence Logic Applied: Filtered {len(df)} rows down to {len(df_clean)} unique documents (Highest Order).")
+        df = df_clean # Update df reference to use the cleaned data
+    else:
+        # Optional: Info message if validation fails (useful for debugging)
+        if has_chain_col:
+            st.caption("ℹ️ Sequence Filter Skipped: Not all documents have a valid chain order.")
+            
+    # --- REFACTORING END ---
+
+    # Filter for selected IDs using the (potentially) cleaned dataframe
     matched = df[df['PK'].isin(ids)]
     
     st.subheader(f"Analyzing {len(matched)} Documents")
     if not matched.empty:
         context = ""
         for _, row in matched.iterrows():
-            context += f"ID: {row['PK']}\nContent: {row.get('email_content', 'No Content')}\n---\n"
+            # Robust extraction: tries 'email_content', falls back to 'Body'
+            content_val = row.get('email_content') or row.get('Body') or 'No Content'
+            context += f"ID: {row['PK']}\nContent: {content_val}\n---\n"
             
         with st.expander("Raw Content"):
             st.text_area("Context", context, height=200)
             
         q = st.chat_input("Ask about this evidence:")
         if q:
+            # Assuming get_cached_llm is available in the global scope of streamlit_app.py
             llm = get_cached_llm(st.session_state.app_state["mistral_key"])
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
             st.info(resp.content)
-
 
 # --- MAIN NAVIGATION ---
 def inject_custom_css():
