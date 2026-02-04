@@ -1902,7 +1902,7 @@ def main():
 
     # Initialize Page State if not present
     if "current_page" not in st.session_state:
-        st.session_state.current_page = "Databook"
+        st.session_state.current_page = "🗃️ Find Evidence Manually"
 
     # 2. Connection Gatekeeper
     if not st.session_state.app_state["connected"]:
