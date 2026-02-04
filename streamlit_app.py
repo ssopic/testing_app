@@ -1290,7 +1290,7 @@ def show_settings_dialog():
 
 @st.fragment
 def screen_extraction():
-    st.title("🔍 Extraction & Cypher Sandbox")
+    st.title("Chat with helper or write your own cypher")
     
     # 1. Define Tabs
     tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
