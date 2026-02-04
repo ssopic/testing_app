@@ -1917,7 +1917,7 @@ def main():
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        st.markdown("### 📥 Input") 
+        st.markdown("Find Evidence and add to cart") 
         
         # Navigation Buttons (Using callbacks for single-click nav)
         st.button("Find Evidence Manually",  use_container_width=True, 
@@ -1954,7 +1954,7 @@ def main():
 
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
-        st.markdown("### 📤 Output")
+        st.markdown("Select from Cart and Analyze")
         
         # Locker Badge Calculation
         locker_count = len(st.session_state.app_state["evidence_locker"])
