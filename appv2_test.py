@@ -478,17 +478,17 @@ def render_explorer_workspace(selector_type, selected_items):
                     st.session_state.app_state["evidence_locker"] = []
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
-                st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
+                st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
 
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
-        st.caption(f"Total items in Locker: {current_count}")
+        st.caption(f"Total items in Evidence Cart: {current_count}")
         
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
 # ==========================================
 
 def screen_databook():
-    st.title("🧭 The Databook Explorer")
+    st.title("🗃️ Find Evidence Manually")
     
     inventory = fetch_inventory()
     
@@ -1408,7 +1408,7 @@ def screen_extraction():
 
 @st.fragment
 def screen_locker():
-    st.title("🗄️ Evidence Locker")
+    st.title("🗄️ Evidence Cart")
     locker = st.session_state.app_state["evidence_locker"]
     
     if not locker:
@@ -1902,7 +1902,7 @@ def main():
 
     # Initialize Page State if not present
     if "current_page" not in st.session_state:
-        st.session_state.current_page = "Databook"
+        st.session_state.current_page = "🗃️ Find Evidence Manually"
 
     # 2. Connection Gatekeeper
     if not st.session_state.app_state["connected"]:
@@ -1920,8 +1920,8 @@ def main():
         st.markdown("### 📥 Input") 
         
         # Navigation Buttons (Using callbacks for single-click nav)
-        st.button("📖 Data",  use_container_width=True, 
-                  on_click=set_page, args=("Databook",))
+        st.button("🗃️ Find Evidence Manually",  use_container_width=True, 
+                  on_click=set_page, args=("🗃️ Find Evidence Manually",))
             
         st.button("🔍 Search", use_container_width=True,
                   on_click=set_page, args=("Search",))
@@ -1941,11 +1941,11 @@ def main():
             # Router Logic
             current = st.session_state.current_page
             
-            if current == "Databook":
+            if current == "🗃️ Find Evidence Manually":
                 screen_databook()
             elif current == "Search":
                 screen_extraction()
-            elif current == "Locker":
+            elif current == "Evidence Cart":
                 screen_locker()
             elif current == "Analysis":
                 screen_analysis()
@@ -1960,8 +1960,8 @@ def main():
         locker_count = len(st.session_state.app_state["evidence_locker"])
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        st.button(f"🗄️ Locker{badge}",  use_container_width=True,
-                  on_click=set_page, args=("Locker",))
+        st.button(f"🗄️ Evidence Cart {badge}",  use_container_width=True,
+                  on_click=set_page, args=("Evidence Cart",))
             
         st.button("📈 Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
