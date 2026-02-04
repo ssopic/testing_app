@@ -488,7 +488,7 @@ def render_explorer_workspace(selector_type, selected_items):
 # ==========================================
 
 def screen_databook():
-    st.title("🗃️ Find Evidence Manually")
+    st.title("Find Evidence Manually")
     
     inventory = fetch_inventory()
     
@@ -1290,7 +1290,7 @@ def show_settings_dialog():
 
 @st.fragment
 def screen_extraction():
-    st.title("🔍 Extraction & Cypher Sandbox")
+    st.title("Chat with helper or write your own cypher")
     
     # 1. Define Tabs
     tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
@@ -1408,7 +1408,7 @@ def screen_extraction():
 
 @st.fragment
 def screen_locker():
-    st.title("🗄️ Evidence Cart")
+    st.title("Evidence Cart")
     locker = st.session_state.app_state["evidence_locker"]
     
     if not locker:
@@ -1902,7 +1902,7 @@ def main():
 
     # Initialize Page State if not present
     if "current_page" not in st.session_state:
-        st.session_state.current_page = "🗃️ Find Evidence Manually"
+        st.session_state.current_page = "Find Evidence Manually"
 
     # 2. Connection Gatekeeper
     if not st.session_state.app_state["connected"]:
@@ -1917,14 +1917,15 @@ def main():
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        st.markdown("### 📥 Input") 
+        st.markdown("Find Evidence and add to cart") 
+        
         
         # Navigation Buttons (Using callbacks for single-click nav)
-        st.button("🗃️ Find Evidence Manually",  use_container_width=True, 
-                  on_click=set_page, args=("🗃️ Find Evidence Manually",))
+        st.button("Find Evidence Manually",  use_container_width=True, 
+                  on_click=set_page, args=("Find Evidence Manually",))
             
-        st.button("🔍 Search", use_container_width=True,
-                  on_click=set_page, args=("Search",))
+        st.button("Find Evidence via Chat or Cypher", use_container_width=True,
+                  on_click=set_page, args=("Find Evidence via Chat or Cypher",))
 
         # Vertical Spacer to push Config to bottom
         st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
@@ -1941,9 +1942,9 @@ def main():
             # Router Logic
             current = st.session_state.current_page
             
-            if current == "🗃️ Find Evidence Manually":
+            if current == "Find Evidence Manually":
                 screen_databook()
-            elif current == "Search":
+            elif current == "Find Evidence via Chat or Cypher":
                 screen_extraction()
             elif current == "Evidence Cart":
                 screen_locker()
@@ -1954,13 +1955,14 @@ def main():
 
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
-        st.markdown("### 📤 Output")
+        st.markdown("Select from Cart and Analyze")
+        
         
         # Locker Badge Calculation
         locker_count = len(st.session_state.app_state["evidence_locker"])
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        st.button(f"🗄️ Evidence Cart {badge}",  use_container_width=True,
+        st.button(f"Evidence Cart",  use_container_width=True,
                   on_click=set_page, args=("Evidence Cart",))
             
         st.button("📈 Analysis",  use_container_width=True,
