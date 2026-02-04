@@ -478,10 +478,10 @@ def render_explorer_workspace(selector_type, selected_items):
                     st.session_state.app_state["evidence_locker"] = []
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
-                st.toast(f"✅ Added {len(unique_ids)} docs to Locker!")
+                st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
 
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
-        st.caption(f"Total items in Locker: {current_count}")
+        st.caption(f"Total items in Evidence Cart: {current_count}")
         
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
@@ -1961,7 +1961,7 @@ def main():
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
         st.button(f"🗄️ Evidence Cart {badge}",  use_container_width=True,
-                  on_click=set_page, args=("Locker",))
+                  on_click=set_page, args=("Evidence Cart",))
             
         st.button("📈 Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
