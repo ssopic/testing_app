@@ -1408,7 +1408,7 @@ def screen_extraction():
 
 @st.fragment
 def screen_locker():
-    st.title("🗄️ Evidence Cart")
+    st.title("Evidence Cart")
     locker = st.session_state.app_state["evidence_locker"]
     
     if not locker:
@@ -1960,7 +1960,7 @@ def main():
         locker_count = len(st.session_state.app_state["evidence_locker"])
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        st.button(f"🗄️ Evidence Cart {badge}",  use_container_width=True,
+        st.button(f"Evidence Cart {badge}",  use_container_width=True,
                   on_click=set_page, args=("Evidence Cart",))
             
         st.button("📈 Analysis",  use_container_width=True,
