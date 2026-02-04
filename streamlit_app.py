@@ -1923,8 +1923,8 @@ def main():
         st.button("Find Evidence Manually",  use_container_width=True, 
                   on_click=set_page, args=("Find Evidence Manually",))
             
-        st.button("🔍 Search", use_container_width=True,
-                  on_click=set_page, args=("Search",))
+        st.button("Find Evidence via Chat or Cypher", use_container_width=True,
+                  on_click=set_page, args=("Find Evidence via Chat or Cypher",))
 
         # Vertical Spacer to push Config to bottom
         st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
@@ -1943,7 +1943,7 @@ def main():
             
             if current == "Find Evidence Manually":
                 screen_databook()
-            elif current == "Search":
+            elif current == "Find Evidence via Chat or Cypher":
                 screen_extraction()
             elif current == "Evidence Cart":
                 screen_locker()
