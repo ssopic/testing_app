@@ -1921,7 +1921,7 @@ def main():
         
         # Navigation Buttons (Using callbacks for single-click nav)
         st.button("🗃️ Find Evidence Manually",  use_container_width=True, 
-                  on_click=set_page, args=("Databook",))
+                  on_click=set_page, args=("🗃️ Find Evidence Manually",))
             
         st.button("🔍 Search", use_container_width=True,
                   on_click=set_page, args=("Search",))
