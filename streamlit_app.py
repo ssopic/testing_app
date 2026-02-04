@@ -488,7 +488,7 @@ def render_explorer_workspace(selector_type, selected_items):
 # ==========================================
 
 def screen_databook():
-    st.title("🧭 The Databook Explorer")
+    st.title("🗃️ Find Evidence Manually")
     
     inventory = fetch_inventory()
     
@@ -1920,7 +1920,7 @@ def main():
         st.markdown("### 📥 Input") 
         
         # Navigation Buttons (Using callbacks for single-click nav)
-        st.button("📖 Data",  use_container_width=True, 
+        st.button("🗃️ Find Evidence Manually",  use_container_width=True, 
                   on_click=set_page, args=("Databook",))
             
         st.button("🔍 Search", use_container_width=True,
@@ -1941,7 +1941,7 @@ def main():
             # Router Logic
             current = st.session_state.current_page
             
-            if current == "Databook":
+            if current == "🗃️ Find Evidence Manually":
                 screen_databook()
             elif current == "Search":
                 screen_extraction()
