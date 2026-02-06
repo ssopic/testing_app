@@ -159,7 +159,6 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                     labels(m)[0] as connected_node_label, 
                     count(*) as count,
                     collect(coalesce(r.source_pks, m.doc_id)) as id_list
-                LIMIT 2000
                 """
                 result = session.run(query, names=names)
             
@@ -295,7 +294,6 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                     labels(m)[0] as connected_node_label, 
                     count(*) as count,
                     collect(coalesce(r.source_pks, m.doc_id)) as id_list
-                LIMIT 2000
                 """
                 result = session.run(query, names=names)
             
