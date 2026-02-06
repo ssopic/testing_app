@@ -1919,7 +1919,7 @@ def main():
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        st.markdown("Find Evidence and add to cart") 
+        st.markdown("Find Evidence and add to cart", text_alignment="center") 
         st.markdown(accent_line, unsafe_allow_html=True)
         
         
@@ -1958,7 +1958,7 @@ def main():
 
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
-        st.markdown("Select from Cart and Analyze")
+        st.markdown("Select from Cart and Analyze", text_alignment="center")
         st.markdown(accent_line, unsafe_allow_html=True)
         
         
