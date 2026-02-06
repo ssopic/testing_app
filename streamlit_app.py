@@ -103,42 +103,30 @@ def fetch_inventory_from_db():
             labels = [r[0] for r in labels_result]
             
             for label in labels:
-                # Filter to ensure we only get nodes that have relationships 
-                # OTHER THAN 'MENTIONED_IN'. 
-                q = f"""
-                MATCH (n:`{label}`)-[r]->() 
-                WHERE n.name IS NOT NULL AND type(r) <> 'MENTIONED_IN' 
-                RETURN DISTINCT n.name as name
-                """
+                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name"
                 names = [r["name"] for r in session.run(q)]
                 if names:
                     inventory["Entities"][label] = sorted(names)
 
             # 2. POPULATE VERBS (Relationships)
+            # We list the Relationship Types as the "Labels"
             rels_result = session.run("CALL db.relationshipTypes()")
-            # Exclude MENTIONED_IN from the available connection types
-            rels = [r[0] for r in rels_result if r[0] != 'MENTIONED_IN']
+            rels = [r[0] for r in rels_result]
             
             for r_type in rels:
+                # For relationships, we might not have a "name", so we leave the list empty 
+                # or we could fetch distinct properties if your schema supports it.
+                # This ensures the 'Verb' menu at least shows the types.
                 inventory["Connections"][r_type] = [] 
 
-            # 3. POPULATE LEXICAL (Text Mentions)
-            # Find nodes that have outgoing MENTIONED_IN relationships.
-            # We group them by label (Person, Organization, etc.) so file fetching works correctly.
-            for label in labels:
-                q_lex = f"""
-                MATCH (n:`{label}`)-[:MENTIONED_IN]->() 
-                WHERE n.name IS NOT NULL
-                RETURN DISTINCT n.name as name
-                """
-                names_lex = [r["name"] for r in session.run(q_lex)]
-                if names_lex:
-                    inventory["Text Mentions"][label] = sorted(names_lex)
+            # 3. POPULATE LEXICAL
+            # Assuming 'MENTIONED_IN' or similar for lexical graph
+            # We can just initialize it or check if specific nodes exist
+            inventory["Text Mentions"]["Document"] = []
 
     except Exception as e:
         st.warning(f"DB Fallback failed: {e}")
     finally:
-        # POTENTIAL ISSUE: Closing a shared driver might be dangerous if cached
         driver.close()
         
     return inventory
@@ -147,7 +135,7 @@ def fetch_inventory_from_db():
 def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
     """
     Fallback: Generates DataFrame via Cypher.
-    Handles 'Object' (Node-Centric), 'Verb' (Relationship-Centric), and 'Text Mentions' (Lexical) logic.
+    Handles 'Object' (Node-Centric) and 'Verb' (Relationship-Centric) logic.
     """
     driver = get_db_driver()
     if not driver or not names:
@@ -157,41 +145,30 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
             if label == "Connections":
+                # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
+                # We want to see: Edge Type -> Source Label -> Target Label
+                # We use string manipulation to inject types safely because Cypher params can't handle dynamic types easily in this specific aggregation way
+                # But safer is to use WHERE type(r) IN $names
+                
                 query = """
                 MATCH (n)-[r]->(m)
-                WHERE type(r) IN $names AND type(r) <> 'MENTIONED_IN'
+                WHERE type(r) IN $names
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as source_node_label, 
                     labels(m)[0] as connected_node_label, 
                     count(*) as count,
                     collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                LIMIT 2000
                 """
                 result = session.run(query, names=names)
             
-            # --- CASE B: LEXICAL (TEXT MENTIONS) ---
-            elif selector_type == "Text Mentions":
-                # Matches Node -> MENTIONED_IN -> Target (usually Document)
-                # Logic is similar to node centric but restricted to specific relationship
-                query = f"""
-                MATCH (n)-[r:MENTIONED_IN]->(m)
-                WHERE n.name IN $names
-                RETURN 
-                    type(r) as edge, 
-                    labels(n)[0] as node, 
-                    coalesce(n.name, 'Unknown') as node_name, 
-                    count(m) as count,
-                    labels(m)[0] as connected_node_label, 
-                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
-                """
-                result = session.run(query, names=names)
-
-            # --- CASE C: NODE CENTRIC (OBJECT) ---
+            # --- CASE B: NODE CENTRIC (OBJECT) ---
             else:
-                # Exclude MENTIONED_IN from standard entity traversal
+                # Standard Logic
                 query = f"""
                 MATCH (n:`{label}`)-[r]->(m)
-                WHERE n.name IN $names AND type(r) <> 'MENTIONED_IN'
+                WHERE n.name IN $names
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as node, 
@@ -209,7 +186,6 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
         st.error(f"Live Query failed: {e}")
         return pd.DataFrame()
     finally:
-        # CRITICAL REFRACTOR POINT: This closes the driver which might be shared!
         driver.close()
         
 # ==========================================
@@ -319,6 +295,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                     labels(m)[0] as connected_node_label, 
                     count(*) as count,
                     collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                LIMIT 2000
                 """
                 result = session.run(query, names=names)
             
@@ -379,9 +356,6 @@ def render_explorer_workspace(selector_type, selected_items):
         if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
-        elif selector_type == "Text Mentions":
-            # Hierarchy: Node Name -> Target Label (Skipping redundant 'edge' layer)
-            path = ['node_name', 'connected_node_label']
         else:
             # Hierarchy: Node Name -> Edge Type -> Target Label
             path = ['node_name', 'edge', 'connected_node_label']
@@ -397,7 +371,7 @@ def render_explorer_workspace(selector_type, selected_items):
             df, 
             path=valid_path, 
             values='count',
-            color='edge' if 'edge' in df.columns and selector_type != "Text Mentions" else None,
+            color='edge' if 'edge' in df.columns else None,
             hover_data=hover_cols
         )
         fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
@@ -405,52 +379,46 @@ def render_explorer_workspace(selector_type, selected_items):
 
     with c_right:
         st.subheader("Filter Data", divider = "gray")
+        st.caption("Filter by Relationships and Target Types")
+
+        # --- UPDATED: Multi-Select Cascading Filters ---
         
-        # Initialize defaults to avoid UnboundLocalError
-        final_filtered_df = df
-        selected_edges = []
-        selected_targets = []
-
-        if selector_type != "Text Mentions":
-            st.caption("Filter by Relationships and Target Types")
-
-            # --- UPDATED: Multi-Select Cascading Filters ---
-            
-            # 1. Edge Filter (Multi)
-            edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-            
-            selected_edges = st.multiselect(
-                "Filter by Connection Type:",
-                options=edge_options,
-                default=[], # Empty implies "All"
-                placeholder="Select connection types (Empty = All)",
-                key="filter_edge_multi"
-            )
-
-            # 2. Target Label Filter (Multi)
-            if not selected_edges:
-                filtered_df_step1 = df
-            else:
-                filtered_df_step1 = df[df['edge'].isin(selected_edges)]
-                
-            target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
-
-            selected_targets = st.multiselect(
-                "Filter by Target Type:",
-                options=target_options,
-                default=[], # Empty implies "All"
-                placeholder="Select target types (Empty = All)",
-                key="filter_target_multi"
-            )
-
-            # 3. Apply Final Filter
-            if not selected_targets:
-                final_filtered_df = filtered_df_step1
-            else:
-                final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+        # 1. Edge Filter (Multi)
+        edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         
+        selected_edges = st.multiselect(
+            "Filter by Connection Type:",
+            options=edge_options,
+            default=[], # Empty implies "All"
+            placeholder="Select connection types (Empty = All)",
+            key="filter_edge_multi"
+        )
+
+        # 2. Target Label Filter (Multi)
+        # Determine valid target labels based on edge selection
+        if not selected_edges:
+            # If no specific edges selected, use all data for target options
+            filtered_df_step1 = df
         else:
-            st.caption("Showing all Text Mentions.")
+            # FIX: Use .isin() for list comparison
+            filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+            
+        target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
+
+        selected_targets = st.multiselect(
+            "Filter by Target Type:",
+            options=target_options,
+            default=[], # Empty implies "All"
+            placeholder="Select target types (Empty = All)",
+            key="filter_target_multi"
+        )
+
+        # 3. Apply Final Filter
+        if not selected_targets:
+            final_filtered_df = filtered_df_step1
+        else:
+            # FIX: Use .isin() for list comparison
+            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
 
         # 4. Flatten IDs
         def deep_flatten(container):
@@ -478,6 +446,7 @@ def render_explorer_workspace(selector_type, selected_items):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
+                # Construct query description
                 if len(names) > 1:
                     if selector_type == "Connections":
                         name_str = f"Connections: {', '.join(names)}"
@@ -489,6 +458,7 @@ def render_explorer_workspace(selector_type, selected_items):
                 query_desc = f"Manual Explorer: {name_str}"
                 filters = []
                 
+                # Logic to describe filters: "All" or list of items
                 if selected_edges:
                     filters.append(f"Edges: {', '.join(selected_edges)}")
                 
@@ -519,6 +489,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
 def screen_databook():
     st.title("Find Evidence Manually")
+    
     
     inventory = fetch_inventory()
     
@@ -579,111 +550,116 @@ def screen_databook():
 
             # 3. Scrollable List Container (FIXED HEIGHT)
             with st.container(height=400, border=False):
-                available_data = inventory.get(selector_type, {})
-                
-                if not available_data:
-                    st.caption(f"No inventory for {selector_type}.")
+                # --- LOGIC FOR LEXICAL (Placeholder) ---
+                if selector_type == "Text Mentions":
+                     st.info("Lexical Analysis (Text-Mentions) will be added in a future update.")
+
+                # --- LOGIC FOR OBJECT & VERB ---
                 else:
-                    if isinstance(available_data, dict):
-                        # --- OBJECT MODE & LEXICAL MODE ---
-                        # UPDATED: Merged "Text Mentions" into this block so it uses the same UI
-                        if selector_type in ["Entities", "Text Mentions"]:
-                            labels = sorted(list(available_data.keys()))
-                            for label in labels:
-                                search_key = f"search_{selector_type}_{label}"
-                                is_expanded = bool(st.session_state.get(search_key, ""))
-
-                                with st.expander(f"{label}", expanded=is_expanded):
-                                    # Clean data
-                                    raw_vals = available_data[label]
-                                    clean_names = []
-                                    if isinstance(raw_vals, dict):
-                                        clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
-                                    elif isinstance(raw_vals, list):
-                                        clean_names = [v for v in raw_vals if v and pd.notna(v)]
-                                    names = sorted(list(set(str(n) for n in clean_names)))
-                                    
-                                    if names:
-                                        # UPDATED SEARCH BAR
-                                        # Using [5, 1] ratio for a tighter "icon-like" button
-                                        c_search, c_btn = st.columns([5, 1])
-                                        with c_search:
-                                            search_term = st.text_input(
-                                                f"Search {label}", 
-                                                placeholder=f"Filter...", 
-                                                key=search_key,
-                                                label_visibility="collapsed"
-                                            )
-                                        with c_btn:
-                                            # Button triggers rerun naturally
-                                            st.button("⏎", key=f"btn_{search_key}",  use_container_width=True)
-
-                                        filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
-                                        
-                                        if not filtered_names:
-                                            st.caption("No matches.")
-                                        else:
-                                            # Truncate large lists
-                                            display_names = filtered_names[:50] if (len(filtered_names) > 50 and not search_term) else filtered_names
-                                            if len(filtered_names) > 50 and not search_term:
-                                                st.info(f"Showing 50 of {len(filtered_names)}.")
-
-                                            for name in display_names:
-                                                is_selected = (label, name) in st.session_state.databook_selections
-                                                chk_key = f"chk_{selector_type}_{label}_{name}"
-                                                
-                                                def update_selection(l=label, n=name, k=chk_key):
-                                                    if st.session_state[k]:
-                                                        st.session_state.databook_selections.add((l, n))
-                                                    else:
-                                                        st.session_state.databook_selections.discard((l, n))
-
-                                                st.checkbox(name, value=is_selected, key=chk_key, on_change=update_selection)
-                                    else:
-                                        st.caption("No names.")
-
-                        # --- VERB MODE ---
-                        elif selector_type == "Connections":
-                            rel_types = sorted(list(available_data.keys()))
-                            if rel_types:
-                                search_key = f"search_{selector_type}"
-                                
-                                # UPDATED SEARCH BAR
-                                c_search, c_btn = st.columns([5, 1])
-                                with c_search:
-                                    search_term = st.text_input(
-                                        "Search Relationships", 
-                                        placeholder="Filter...", 
-                                        key=search_key,
-                                        label_visibility="collapsed"
-                                    )
-                                with c_btn:
-                                    st.button("⏎", key=f"btn_{search_key}", help="Apply Filter", use_container_width=True)
-                                
-                                filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
-                                
-                                for r_type in filtered_rels:
-                                    is_selected = ("Connections", r_type) in st.session_state.databook_selections
-                                    chk_key = f"chk_verb_{r_type}"
-                                    
-                                    def update_verb_selection(t=r_type, k=chk_key):
-                                        if st.session_state[k]:
-                                            st.session_state.databook_selections.add(("Connections", t))
-                                        else:
-                                            st.session_state.databook_selections.discard(("Connection", t))
-                                    
-                                    st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
-                            else:
-                                st.caption("No Connection types found.")
+                    available_data = inventory.get(selector_type, {})
+                    
+                    if not available_data:
+                        st.caption(f"No inventory for {selector_type}.")
                     else:
-                        st.error("Invalid inventory format.")
+                        if isinstance(available_data, dict):
+                            # --- OBJECT MODE ---
+                            if selector_type == "Entities":
+                                labels = sorted(list(available_data.keys()))
+                                for label in labels:
+                                    search_key = f"search_{selector_type}_{label}"
+                                    is_expanded = bool(st.session_state.get(search_key, ""))
+
+                                    with st.expander(f"{label}", expanded=is_expanded):
+                                        # Clean data
+                                        raw_vals = available_data[label]
+                                        clean_names = []
+                                        if isinstance(raw_vals, dict):
+                                            clean_names = [v for v in raw_vals.values() if v and pd.notna(v)]
+                                        elif isinstance(raw_vals, list):
+                                            clean_names = [v for v in raw_vals if v and pd.notna(v)]
+                                        names = sorted(list(set(str(n) for n in clean_names)))
+                                        
+                                        if names:
+                                            # UPDATED SEARCH BAR
+                                            # Using [5, 1] ratio for a tighter "icon-like" button
+                                            c_search, c_btn = st.columns([5, 1])
+                                            with c_search:
+                                                search_term = st.text_input(
+                                                    f"Search {label}", 
+                                                    placeholder=f"Filter...", 
+                                                    key=search_key,
+                                                    label_visibility="collapsed"
+                                                )
+                                            with c_btn:
+                                                # Button triggers rerun naturally
+                                                st.button("⏎", key=f"btn_{search_key}",  use_container_width=True)
+
+                                            filtered_names = [n for n in names if search_term.lower() in n.lower()] if search_term else names
+                                            
+                                            if not filtered_names:
+                                                st.caption("No matches.")
+                                            else:
+                                                # Truncate large lists
+                                                display_names = filtered_names[:50] if (len(filtered_names) > 50 and not search_term) else filtered_names
+                                                if len(filtered_names) > 50 and not search_term:
+                                                    st.info(f"Showing 50 of {len(filtered_names)}.")
+
+                                                for name in display_names:
+                                                    is_selected = (label, name) in st.session_state.databook_selections
+                                                    chk_key = f"chk_{selector_type}_{label}_{name}"
+                                                    
+                                                    def update_selection(l=label, n=name, k=chk_key):
+                                                        if st.session_state[k]:
+                                                            st.session_state.databook_selections.add((l, n))
+                                                        else:
+                                                            st.session_state.databook_selections.discard((l, n))
+
+                                                    st.checkbox(name, value=is_selected, key=chk_key, on_change=update_selection)
+                                        else:
+                                            st.caption("No names.")
+
+                            # --- VERB MODE ---
+                            elif selector_type == "Connections":
+                                rel_types = sorted(list(available_data.keys()))
+                                if rel_types:
+                                    search_key = f"search_{selector_type}"
+                                    
+                                    # UPDATED SEARCH BAR
+                                    c_search, c_btn = st.columns([5, 1])
+                                    with c_search:
+                                        search_term = st.text_input(
+                                            "Search Relationships", 
+                                            placeholder="Filter...", 
+                                            key=search_key,
+                                            label_visibility="collapsed"
+                                        )
+                                    with c_btn:
+                                        st.button("⏎", key=f"btn_{search_key}", help="Apply Filter", use_container_width=True)
+                                    
+                                    filtered_rels = [r for r in rel_types if search_term.lower() in r.lower()] if search_term else rel_types
+                                    
+                                    for r_type in filtered_rels:
+                                        is_selected = ("Connections", r_type) in st.session_state.databook_selections
+                                        chk_key = f"chk_verb_{r_type}"
+                                        
+                                        def update_verb_selection(t=r_type, k=chk_key):
+                                            if st.session_state[k]:
+                                                st.session_state.databook_selections.add(("Connections", t))
+                                            else:
+                                                st.session_state.databook_selections.discard(("Connection", t))
+                                        
+                                        st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
+                                else:
+                                    st.caption("No Connection types found.")
+                        else:
+                            st.error("Invalid inventory format.")
 
     with c_workspace:
-        # UPDATED: Removed the blocking if statement to allow rendering of Text Mentions
-        render_explorer_workspace(
-            selector_type, 
-            st.session_state.active_explorer_items
-        )
+        if selector_type != "Text Mentions":
+            render_explorer_workspace(
+                selector_type, 
+                st.session_state.active_explorer_items
+            )
         
 # ==========================================
 # 0. NON UPDATED PARTS
