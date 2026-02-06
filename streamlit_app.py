@@ -380,6 +380,9 @@ def render_explorer_workspace(selector_type, selected_items):
         if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
+        elif selector_type == "Text Mentions":
+            # Hierarchy: Node Name -> Target Label (Skipping redundant 'edge' layer)
+            path = ['node_name', 'connected_node_label']
         else:
             # Hierarchy: Node Name -> Edge Type -> Target Label
             path = ['node_name', 'edge', 'connected_node_label']
@@ -395,7 +398,7 @@ def render_explorer_workspace(selector_type, selected_items):
             df, 
             path=valid_path, 
             values='count',
-            color='edge' if 'edge' in df.columns else None,
+            color='edge' if 'edge' in df.columns and selector_type != "Text Mentions" else None,
             hover_data=hover_cols
         )
         fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
@@ -419,12 +422,9 @@ def render_explorer_workspace(selector_type, selected_items):
         )
 
         # 2. Target Label Filter (Multi)
-        # Determine valid target labels based on edge selection
         if not selected_edges:
-            # If no specific edges selected, use all data for target options
             filtered_df_step1 = df
         else:
-            # FIX: Use .isin() for list comparison
             filtered_df_step1 = df[df['edge'].isin(selected_edges)]
             
         target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
@@ -441,7 +441,6 @@ def render_explorer_workspace(selector_type, selected_items):
         if not selected_targets:
             final_filtered_df = filtered_df_step1
         else:
-            # FIX: Use .isin() for list comparison
             final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
 
         # 4. Flatten IDs
@@ -470,7 +469,6 @@ def render_explorer_workspace(selector_type, selected_items):
             if not unique_ids:
                 st.error("No documents to add.")
             else:
-                # Construct query description
                 if len(names) > 1:
                     if selector_type == "Connections":
                         name_str = f"Connections: {', '.join(names)}"
@@ -482,7 +480,6 @@ def render_explorer_workspace(selector_type, selected_items):
                 query_desc = f"Manual Explorer: {name_str}"
                 filters = []
                 
-                # Logic to describe filters: "All" or list of items
                 if selected_edges:
                     filters.append(f"Edges: {', '.join(selected_edges)}")
                 
