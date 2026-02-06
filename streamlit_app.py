@@ -406,42 +406,52 @@ def render_explorer_workspace(selector_type, selected_items):
 
     with c_right:
         st.subheader("Filter Data", divider = "gray")
-        st.caption("Filter by Relationships and Target Types")
-
-        # --- UPDATED: Multi-Select Cascading Filters ---
         
-        # 1. Edge Filter (Multi)
-        edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-        
-        selected_edges = st.multiselect(
-            "Filter by Connection Type:",
-            options=edge_options,
-            default=[], # Empty implies "All"
-            placeholder="Select connection types (Empty = All)",
-            key="filter_edge_multi"
-        )
+        # Initialize defaults to avoid UnboundLocalError
+        final_filtered_df = df
+        selected_edges = []
+        selected_targets = []
 
-        # 2. Target Label Filter (Multi)
-        if not selected_edges:
-            filtered_df_step1 = df
-        else:
-            filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+        if selector_type != "Text Mentions":
+            st.caption("Filter by Relationships and Target Types")
+
+            # --- UPDATED: Multi-Select Cascading Filters ---
             
-        target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
+            # 1. Edge Filter (Multi)
+            edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
+            
+            selected_edges = st.multiselect(
+                "Filter by Connection Type:",
+                options=edge_options,
+                default=[], # Empty implies "All"
+                placeholder="Select connection types (Empty = All)",
+                key="filter_edge_multi"
+            )
 
-        selected_targets = st.multiselect(
-            "Filter by Target Type:",
-            options=target_options,
-            default=[], # Empty implies "All"
-            placeholder="Select target types (Empty = All)",
-            key="filter_target_multi"
-        )
+            # 2. Target Label Filter (Multi)
+            if not selected_edges:
+                filtered_df_step1 = df
+            else:
+                filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+                
+            target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
 
-        # 3. Apply Final Filter
-        if not selected_targets:
-            final_filtered_df = filtered_df_step1
+            selected_targets = st.multiselect(
+                "Filter by Target Type:",
+                options=target_options,
+                default=[], # Empty implies "All"
+                placeholder="Select target types (Empty = All)",
+                key="filter_target_multi"
+            )
+
+            # 3. Apply Final Filter
+            if not selected_targets:
+                final_filtered_df = filtered_df_step1
+            else:
+                final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+        
         else:
-            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+            st.caption("Showing all Text Mentions.")
 
         # 4. Flatten IDs
         def deep_flatten(container):
