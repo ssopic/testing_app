@@ -489,7 +489,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
 def screen_databook():
     st.title("Find Evidence Manually")
-    st.markdown(accent_line, unsafe_allow_html=True)
+    
     
     inventory = fetch_inventory()
     
@@ -1920,6 +1920,7 @@ def main():
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
         st.markdown("Find Evidence and add to cart") 
+        st.markdown(accent_line, unsafe_allow_html=True)
         
         
         # Navigation Buttons (Using callbacks for single-click nav)
