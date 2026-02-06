@@ -135,7 +135,7 @@ def fetch_inventory_from_db():
 def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
     """
     Fallback: Generates DataFrame via Cypher.
-    Handles 'Object' (Node-Centric) and 'Verb' (Relationship-Centric) logic.
+    Handles 'Object' (Node-Centric), 'Verb' (Relationship-Centric), and 'Text Mentions' (Lexical) logic.
     """
     driver = get_db_driver()
     if not driver or not names:
@@ -145,14 +145,9 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
         with driver.session() as session:
             # --- CASE A: RELATIONSHIP CENTRIC (VERB) ---
             if label == "Connections":
-                # Names list contains Relationship Types (e.g. ['COMMUNICATION', 'PAID'])
-                # We want to see: Edge Type -> Source Label -> Target Label
-                # We use string manipulation to inject types safely because Cypher params can't handle dynamic types easily in this specific aggregation way
-                # But safer is to use WHERE type(r) IN $names
-                
                 query = """
                 MATCH (n)-[r]->(m)
-                WHERE type(r) IN $names
+                WHERE type(r) IN $names AND type(r) <> 'MENTIONED_IN'
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as source_node_label, 
@@ -163,12 +158,29 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 """
                 result = session.run(query, names=names)
             
-            # --- CASE B: NODE CENTRIC (OBJECT) ---
+            # --- CASE B: LEXICAL (TEXT MENTIONS) ---
+            elif selector_type == "Text Mentions":
+                # Matches Node -> MENTIONED_IN -> Target (usually Document)
+                # Logic is similar to node centric but restricted to specific relationship
+                query = f"""
+                MATCH (n)-[r:MENTIONED_IN]->(m)
+                WHERE n.name IN $names
+                RETURN 
+                    type(r) as edge, 
+                    labels(n)[0] as node, 
+                    coalesce(n.name, 'Unknown') as node_name, 
+                    count(m) as count,
+                    labels(m)[0] as connected_node_label, 
+                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
+                """
+                result = session.run(query, names=names)
+
+            # --- CASE C: NODE CENTRIC (OBJECT) ---
             else:
-                # Standard Logic
+                # Exclude MENTIONED_IN from standard entity traversal
                 query = f"""
                 MATCH (n:`{label}`)-[r]->(m)
-                WHERE n.name IN $names
+                WHERE n.name IN $names AND type(r) <> 'MENTIONED_IN'
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as node, 
