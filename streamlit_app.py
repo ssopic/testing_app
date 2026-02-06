@@ -489,6 +489,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
 def screen_databook():
     st.title("Find Evidence Manually")
+    st.markdown(accent_line, unsafe_allow_html=True)
     
     inventory = fetch_inventory()
     
@@ -1883,7 +1884,8 @@ def inject_custom_css():
         """,
         unsafe_allow_html=True
     )
-    
+accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
+
 def set_page(page_name):
     """Helper to update the current page in session state."""
     st.session_state.current_page = page_name
@@ -1956,6 +1958,7 @@ def main():
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
         st.markdown("Select from Cart and Analyze")
+        st.markdown(accent_line, unsafe_allow_html=True)
         
         
         # Locker Badge Calculation
