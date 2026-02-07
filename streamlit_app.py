@@ -89,7 +89,10 @@ def get_db_driver():
     return None
 
 def fetch_inventory_from_db():
-    """Fallback: Generates the inventory dict by querying the live DB."""
+    """
+    Refactored Fallback: Generates the inventory dict with strict segregation.
+    Uses EXISTS subqueries for robust filtering of Semantic vs Lexical nodes.
+    """
     inventory = {"Entities": {}, "Connections": {}, "Text Mentions": {}}
     driver = get_db_driver()
     
@@ -103,26 +106,38 @@ def fetch_inventory_from_db():
             labels = [r[0] for r in labels_result]
             
             for label in labels:
-                q = f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.name as name"
-                names = [r["name"] for r in session.run(q)]
-                if names:
-                    inventory["Entities"][label] = sorted(names)
+                # --- A. ENTITIES (Semantic Priority) ---
+                # Nodes that have AT LEAST ONE outgoing Semantic relationship.
+                q_entities = f"""
+                MATCH (n:`{label}`)
+                WHERE n.name IS NOT NULL
+                AND EXISTS {{ (n)-[r]->() WHERE type(r) <> 'MENTIONED_IN' }}
+                RETURN DISTINCT n.name as name
+                """
+                names_entities = [r["name"] for r in session.run(q_entities)]
+                if names_entities:
+                    inventory["Entities"][label] = sorted(names_entities)
 
-            # 2. POPULATE VERBS (Relationships)
-            # We list the Relationship Types as the "Labels"
+                # --- B. TEXT MENTIONS (Purely Lexical) ---
+                # Nodes that have MENTIONED_IN but NO outgoing Semantic relationships.
+                q_lexical = f"""
+                MATCH (n:`{label}`)
+                WHERE n.name IS NOT NULL
+                AND EXISTS {{ (n)-[:MENTIONED_IN]->() }}
+                AND NOT EXISTS {{ (n)-[r]->() WHERE type(r) <> 'MENTIONED_IN' }}
+                RETURN DISTINCT n.name as name
+                """
+                names_lexical = [r["name"] for r in session.run(q_lexical)]
+                if names_lexical:
+                    inventory["Text Mentions"][label] = sorted(names_lexical)
+
+            # 2. POPULATE VERBS (Relationships - Semantic Only)
             rels_result = session.run("CALL db.relationshipTypes()")
-            rels = [r[0] for r in rels_result]
+            # Exclude MENTIONED_IN from the available connections list
+            rels = [r[0] for r in rels_result if r[0] != "MENTIONED_IN"]
             
             for r_type in rels:
-                # For relationships, we might not have a "name", so we leave the list empty 
-                # or we could fetch distinct properties if your schema supports it.
-                # This ensures the 'Verb' menu at least shows the types.
                 inventory["Connections"][r_type] = [] 
-
-            # 3. POPULATE LEXICAL
-            # Assuming 'MENTIONED_IN' or similar for lexical graph
-            # We can just initialize it or check if specific nodes exist
-            inventory["Text Mentions"]["Document"] = []
 
     except Exception as e:
         st.warning(f"DB Fallback failed: {e}")
@@ -130,7 +145,6 @@ def fetch_inventory_from_db():
         driver.close()
         
     return inventory
-
 
 def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> pd.DataFrame:
     """
@@ -165,16 +179,16 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
             # --- CASE B: TEXT MENTIONS (PURE LEXICAL) ---
             elif selector_type == "Text Mentions":
                 # Pure Lexical: Fetch only MENTIONED_IN
-                # Include source Label for hierarchy (Person -> Name -> Document)
+                # Logic: Fetch MENTIONED_IN edges, but return columns compatible with Entity View
                 query = f"""
                 MATCH (n:`{label}`)-[r:MENTIONED_IN]->(m:Document)
                 WHERE n.name IN $names
                 RETURN 
-                    type(r) as edge, 
-                    labels(n)[0] as node,  // e.g. "Person"
+                    type(r) as edge,            // Returns "MENTIONED_IN"
+                    labels(n)[0] as node, 
                     coalesce(n.name, 'Unknown') as node_name, 
                     count(m) as count,
-                    'Document' as connected_node_label, 
+                    'Document' as connected_node_label, // Explicit Target Label
                     collect(coalesce(r.source_pks, m.doc_id)) as id_list
                 """
                 result = session.run(query, names=names)
@@ -287,6 +301,16 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
 # ==========================================
 # 3. Processing entities 
 # ==========================================
+def flatten_ids(container):
+    """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
+    ids = set()
+    if isinstance(container, (list, tuple, set)):
+        for item in container:
+            ids.update(flatten_ids(item))
+    elif pd.notna(container):
+        ids.add(container)
+    return ids
+
 def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
     """
     Implements the "Semantic Priority" logic.
@@ -326,16 +350,6 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
     
     # 5. Recombine
     return pd.concat([semantic_df, lexical_df], ignore_index=True)
-
-def flatten_ids(container):
-    """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
-    ids = set()
-    if isinstance(container, (list, tuple, set)):
-        for item in container:
-            ids.update(flatten_ids(item))
-    elif pd.notna(container):
-        ids.add(container)
-    return ids
 # ==============================================================================
 # UPDATED BACKEND: VERB SUPPORT
 # ==============================================================================
@@ -375,13 +389,9 @@ def render_explorer_workspace(selector_type, selected_items):
         if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
-        elif selector_type == "Text Mentions":
-            # Hierarchy: Source Label -> Node Name -> Connected (Document)
-            # This groups lexical mentions by entity type (e.g. all Persons together)
-            path = ['node', 'node_name', 'connected_node_label']
         else:
             # Hierarchy: Node Name -> Edge Type -> Target Label
-            # Works for 'Entities' (Semantic+Lexical)
+            # Used for both 'Entities' and 'Text Mentions' (to match structure)
             path = ['node_name', 'edge', 'connected_node_label']
 
         # Ensure columns exist before plotting
