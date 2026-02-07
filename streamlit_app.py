@@ -554,6 +554,12 @@ def screen_databook():
                 st.session_state.databook_selections = set()
                 st.session_state.active_explorer_items = []
                 st.session_state.last_selector_type = selector_type
+                
+                # Also clear checkboxes when switching tabs to prevent state leakage
+                for key in list(st.session_state.keys()):
+                    if key.startswith("chk_"):
+                        del st.session_state[key]
+                        
                 st.rerun()
 
             st.divider()
@@ -571,6 +577,12 @@ def screen_databook():
                 if st.button("Clear", use_container_width=True):
                     st.session_state.databook_selections = set()
                     st.session_state.active_explorer_items = []
+                    
+                    # Force-reset all checkbox widget states
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("chk_"):
+                            del st.session_state[key]
+                            
                     st.rerun()
 
             st.divider()
