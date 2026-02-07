@@ -165,12 +165,13 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
             # --- CASE B: TEXT MENTIONS (PURE LEXICAL) ---
             elif selector_type == "Text Mentions":
                 # Pure Lexical: Fetch only MENTIONED_IN
+                # Include source Label for hierarchy (Person -> Name -> Document)
                 query = f"""
                 MATCH (n:`{label}`)-[r:MENTIONED_IN]->(m:Document)
                 WHERE n.name IN $names
                 RETURN 
                     type(r) as edge, 
-                    labels(n)[0] as node, 
+                    labels(n)[0] as node,  // e.g. "Person"
                     coalesce(n.name, 'Unknown') as node_name, 
                     count(m) as count,
                     'Document' as connected_node_label, 
@@ -304,20 +305,18 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
     semantic_df = df[df['edge'] != 'MENTIONED_IN'].copy()
     lexical_df = df[df['edge'] == 'MENTIONED_IN'].copy()
     
-    # 2. Collect all Semantic IDs into a set
+    # 2. Collect all Semantic IDs into a set (FLATTENED)
+    # This prevents "unhashable type: list" errors if id_list contains nested lists
     semantic_ids = set()
     for ids in semantic_df['id_list']:
-        if isinstance(ids, list):
-            semantic_ids.update(ids)
-        elif pd.notna(ids):
-            semantic_ids.add(ids)
+        semantic_ids.update(flatten_ids(ids))
             
     # 3. Filter Lexical IDs
     def filter_ids(row_ids):
-        if not isinstance(row_ids, list):
-            return []
-        # Return only IDs that are NOT in the semantic set
-        return list(set(row_ids) - semantic_ids)
+        # Flatten row_ids first
+        row_set = flatten_ids(row_ids)
+        # Subtract semantic IDs
+        return list(row_set - semantic_ids)
         
     lexical_df['id_list'] = lexical_df['id_list'].apply(filter_ids)
     lexical_df['count'] = lexical_df['id_list'].apply(len)
@@ -327,6 +326,16 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
     
     # 5. Recombine
     return pd.concat([semantic_df, lexical_df], ignore_index=True)
+
+def flatten_ids(container):
+    """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
+    ids = set()
+    if isinstance(container, (list, tuple, set)):
+        for item in container:
+            ids.update(flatten_ids(item))
+    elif pd.notna(container):
+        ids.add(container)
+    return ids
 # ==============================================================================
 # UPDATED BACKEND: VERB SUPPORT
 # ==============================================================================
@@ -366,9 +375,13 @@ def render_explorer_workspace(selector_type, selected_items):
         if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
+        elif selector_type == "Text Mentions":
+            # Hierarchy: Source Label -> Node Name -> Connected (Document)
+            # This groups lexical mentions by entity type (e.g. all Persons together)
+            path = ['node', 'node_name', 'connected_node_label']
         else:
             # Hierarchy: Node Name -> Edge Type -> Target Label
-            # Works for both 'Entities' (Semantic+Lexical) and 'Text Mentions' (Lexical only)
+            # Works for 'Entities' (Semantic+Lexical)
             path = ['node_name', 'edge', 'connected_node_label']
 
         # Ensure columns exist before plotting
