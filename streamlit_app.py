@@ -532,6 +532,10 @@ def screen_databook():
     if "last_selector_type" not in st.session_state:
         st.session_state.last_selector_type = "Entities"
 
+    # Initialize RESET TOKEN to handle checkbox state clearing
+    if "widget_reset_token" not in st.session_state:
+        st.session_state.widget_reset_token = 0
+
     if not inventory:
         st.warning("⚠️ Could not load Inventory (GitHub or DB). check connection.")
     
@@ -555,7 +559,10 @@ def screen_databook():
                 st.session_state.active_explorer_items = []
                 st.session_state.last_selector_type = selector_type
                 
-                # Also clear checkboxes when switching tabs to prevent state leakage
+                # Increment reset token to force new widget instances
+                st.session_state.widget_reset_token += 1
+                
+                # Cleanup old keys to be safe
                 for key in list(st.session_state.keys()):
                     if key.startswith("chk_"):
                         del st.session_state[key]
@@ -578,7 +585,10 @@ def screen_databook():
                     st.session_state.databook_selections = set()
                     st.session_state.active_explorer_items = []
                     
-                    # Force-reset all checkbox widget states
+                    # Increment reset token to force new widget instances
+                    st.session_state.widget_reset_token += 1
+                    
+                    # Cleanup old keys
                     for key in list(st.session_state.keys()):
                         if key.startswith("chk_"):
                             del st.session_state[key]
@@ -595,6 +605,8 @@ def screen_databook():
                     st.caption(f"No items found for {selector_type}.")
                 else:
                     if isinstance(available_data, dict):
+                        token = st.session_state.widget_reset_token
+
                         # --- OBJECT MODE (Entities OR Text Mentions) ---
                         if selector_type in ["Entities", "Text Mentions"]:
                             labels = sorted(list(available_data.keys()))
@@ -637,7 +649,8 @@ def screen_databook():
 
                                             for name in display_names:
                                                 is_selected = (label, name) in st.session_state.databook_selections
-                                                chk_key = f"chk_{selector_type}_{label}_{name}"
+                                                # KEY CHANGE: Include token in key to support force-resets
+                                                chk_key = f"chk_{token}_{selector_type}_{label}_{name}"
                                                 
                                                 def update_selection(l=label, n=name, k=chk_key):
                                                     if st.session_state[k]:
@@ -670,7 +683,8 @@ def screen_databook():
                                 
                                 for r_type in filtered_rels:
                                     is_selected = ("Connections", r_type) in st.session_state.databook_selections
-                                    chk_key = f"chk_verb_{r_type}"
+                                    # KEY CHANGE: Include token in key
+                                    chk_key = f"chk_{token}_verb_{r_type}"
                                     
                                     def update_verb_selection(t=r_type, k=chk_key):
                                         if st.session_state[k]:
