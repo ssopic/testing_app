@@ -687,10 +687,10 @@ def screen_databook():
                                     chk_key = f"chk_{token}_verb_{r_type}"
                                     
                                     def update_verb_selection(t=r_type, k=chk_key):
-                                        if st.session_state[k]:
+                                        if st.session_state.get(k, False):
                                             st.session_state.databook_selections.add(("Connections", t))
                                         else:
-                                            st.session_state.databook_selections.discard(("Connection", t))
+                                            st.session_state.databook_selections.discard(("Connections", t))
                                     
                                     st.checkbox(r_type, value=is_selected, key=chk_key, on_change=update_verb_selection)
                             else:
