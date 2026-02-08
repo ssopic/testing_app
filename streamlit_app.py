@@ -1496,6 +1496,7 @@ def screen_analysis():
     st.title("🔬 Analysis Pane")
     
     # Retrieve selected IDs safely
+    # Assumes st.session_state.app_state is initialized elsewhere
     ids = list(st.session_state.app_state.get("selected_ids", []))
     
     if not ids:
@@ -1504,6 +1505,42 @@ def screen_analysis():
     
     # Get the main dataframe
     df = st.session_state.github_data
+
+    # --- DIAGNOSTIC START: PK Identity Crisis ---
+    with st.expander("🕵️ Data Diagnostic (PK Test)", expanded=True):
+        # Check 1: Is PK unique?
+        is_pk_unique = df['PK'].is_unique
+        st.write(f"**Is PK unique per row?** {is_pk_unique}")
+        
+        if is_pk_unique:
+            st.warning("⚠️ PK is unique for every row. Grouping by 'PK' will NOT collapse threads. Using 'drop_duplicates(subset=['PK'])' effectively does nothing.")
+        else:
+            st.success("✅ PK is NOT unique. This suggests it might be a Thread ID.")
+            
+            # Check 2: Do duplicates have different sequence orders?
+            # Find a PK with multiple entries
+            dup_pks = df['PK'].value_counts()
+            multi_row_pks = dup_pks[dup_pks > 1]
+            
+            if not multi_row_pks.empty:
+                sample_pk = multi_row_pks.index[0]
+                st.write(f"**Sample Thread (PK={sample_pk}):**")
+                
+                # Determine columns to show based on availability
+                cols_to_show = ['PK', 'chain_sequence_order']
+                if 'Body' in df.columns:
+                    cols_to_show.append('Body')
+                
+                # Show sample rows sorted by sequence
+                sample_rows = df[df['PK'] == sample_pk][cols_to_show].sort_values('chain_sequence_order')
+                st.dataframe(sample_rows)
+                
+                # Logic Conclusion
+                if sample_rows['chain_sequence_order'].nunique() > 1:
+                    st.info("💡 Conclusion: PK groups multiple rows with different sequence orders. It is a Thread ID.")
+                else:
+                    st.warning("⚠️ Conclusion: PK groups rows, but they have the SAME sequence order. Are these just exact duplicates?")
+    # --- DIAGNOSTIC END ---
 
     # --- REFACTORING START: Chain Sequence Logic ---
     
@@ -1517,7 +1554,6 @@ def screen_analysis():
     if has_chain_col:
         # Debug information requested
         st.caption(f"Debug - Column Type: {df['chain_sequence_order'].dtype}")
-        st.caption(f"Debug - Unique Values: {df['chain_sequence_order'].unique()}")
         
         unique_pks = set(df["PK"].unique())
         # Get PKs where sequence order is present (not NaN)
@@ -1561,10 +1597,10 @@ def screen_analysis():
         q = st.chat_input("Ask about this evidence:")
         if q:
             # Assuming get_cached_llm is available in the global scope of streamlit_app.py
+            # and st.session_state.app_state["mistral_key"] exists
             llm = get_cached_llm(st.session_state.app_state["mistral_key"])
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
             st.info(resp.content)
-
 # --- MAIN NAVIGATION ---
 def inject_custom_css():
     """
