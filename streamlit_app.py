@@ -1580,7 +1580,7 @@ def screen_analysis():
             
             # Content Display
             st.caption("Document Body")
-            st.text_area("Body content", view_row.get('Body', ''), height=300, label_visibility="collapsed")
+            st.text_area("Body content", view_row.get('Body', ''), height=300, label_visibility="collapsed", disabled=True)
             
         # --- 3. Chat Interface ---
         # Optional: Show what the LLM sees
