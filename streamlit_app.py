@@ -1532,25 +1532,40 @@ def screen_analysis():
                 else:
                     st.warning("⚠️ PK groups rows, but they ALL have the SAME sequence order.")
             
-            # --- NEW TEST REQUESTED ---
+            # Check 3: Content Duplication
             st.write("### 3. Content Duplication Check (Body)")
-            # Check if (PK + Body) combinations are duplicated
-            # This detects if the SAME message appears multiple times in the SAME thread
             if 'Body' in df.columns:
                 body_dupes = df[df.duplicated(subset=['PK', 'Body'], keep=False)]
                 
                 if not body_dupes.empty:
                     st.warning(f"⚠️ **Redundancy Found:** {len(body_dupes)} rows share the same 'PK' AND 'Body'.")
                     st.write("This means the exact same text is repeated within threads.")
-                    
-                    # Show a sample of this redundancy
-                    sample_dupe_pk = body_dupes['PK'].iloc[0]
-                    st.write(f"**Example Redundancy (PK={sample_dupe_pk}):**")
-                    
-                    cols_to_show = ['PK', 'chain_sequence_order', 'Body']
-                    st.dataframe(df[df['PK'] == sample_dupe_pk][cols_to_show].sort_values('chain_sequence_order'))
                 else:
                     st.success("✅ No Content Duplicates: Every row within a PK thread has a unique Body.")
+                
+                # --- NEW TEST REQUESTED: EVOLUTION ---
+                st.write("### 4. Content Evolution Check (The 'Other' Rows)")
+                # We want to analyze threads that have >1 unique body to understand the rows that AREN'T pure duplicates
+                
+                # Group by PK and count unique Bodies
+                pk_body_counts = df.groupby('PK')['Body'].nunique()
+                # Filter for threads with variation (more than 1 unique body)
+                evolving_pks = pk_body_counts[pk_body_counts > 1].index
+                
+                st.write(f"**Number of Threads with Multiple Different Bodies:** {len(evolving_pks)}")
+                
+                if len(evolving_pks) > 0:
+                    st.info(f"💡 Found {len(evolving_pks)} threads that contain varying content (evolution).")
+                    
+                    # Show sample
+                    sample_evo_pk = evolving_pks[0]
+                    st.write(f"**Example of Evolution (PK={sample_evo_pk}):**")
+                    
+                    evo_rows = df[df['PK'] == sample_evo_pk][['PK', 'chain_sequence_order', 'Body']]
+                    st.dataframe(evo_rows.sort_values('chain_sequence_order'))
+                else:
+                    st.write("ℹ️ No threads show content evolution. (All rows within a thread are either single or identical duplicates).")
+
             else:
                 st.error("❌ Cannot check content: 'Body' column missing.")
 
