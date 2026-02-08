@@ -1588,7 +1588,8 @@ def screen_analysis():
         context = ""
         for _, row in matched.iterrows():
             # Robust extraction: tries 'email_content', falls back to 'Body'
-            content_val = row.get('email_content') or row.get('Body') or 'No Content'
+            #content_val =  row.get('Body') or row.get('email_content')  or 'No Content'
+            content_val =  row.get('Body') or 'No Content'
             context += f"ID: {row['PK']}\nContent: {content_val}\n---\n"
             
         with st.expander("Raw Content"):
