@@ -740,15 +740,30 @@ def get_cached_llm(api_key):
 
 @st.cache_data
 def load_github_data():
-    """Loads external context data efficiently."""
+    """Loads external context data efficiently and performs deduplication logic."""
     url = "https://raw.githubusercontent.com/ssopic/some_data/main/sum_data.csv"
     try:
         df = pd.read_csv(url)
-        # Robust cleaning: convert to string, remove potential '.0' from floats, and strip whitespace
+        
+        # 1. Basic Cleaning
+        # Convert PK to string, remove potential '.0' from floats, and strip whitespace
         df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        
+        # 2. Sequence Logic Processing
+        if 'chain_sequence_order' in df.columns:
+            # Ensure sequence is numeric for correct sorting
+            df['chain_sequence_order'] = pd.to_numeric(df['chain_sequence_order'], errors='coerce')
+            
+            # Sort by sequence descending (Highest first)
+            df = df.sort_values(by="chain_sequence_order", ascending=False)
+            
+            # Drop duplicates on PK, keeping the 'first' (highest sequence)
+            df = df.drop_duplicates(subset=["PK"], keep="first")
+            
         return df
     except Exception as e:
-        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body","chain_sequence_order"])
+        # Fallback empty dataframe structure
+        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body", "chain_sequence_order"])
 
 # --- SCHEMA DEFINITIONS (Preserved from Old Version) ---
 
@@ -1503,121 +1518,19 @@ def screen_analysis():
         st.warning("No documents selected.")
         return
     
-    # Get the main dataframe
+    # Get the main dataframe (Already cleaned and deduplicated in load_github_data)
     df = st.session_state.github_data
 
-    # --- DIAGNOSTIC START: PK & Content Identity Crisis ---
-    with st.expander("🕵️ Data Diagnostic (PK & Content Test)", expanded=True):
-        st.write("### 1. Structure Check")
-        # Check 1: Is PK unique?
-        is_pk_unique = df['PK'].is_unique
-        st.write(f"**Is PK unique per row?** {is_pk_unique}")
-        
-        if is_pk_unique:
-            st.warning("⚠️ PK is unique for every row. Grouping by 'PK' will NOT collapse threads. Using 'drop_duplicates(subset=['PK'])' effectively does nothing.")
-        else:
-            st.success("✅ PK is NOT unique. This confirms it functions as a Thread ID.")
-            
-            # Check 2: Do duplicates have different sequence orders?
-            st.write("### 2. Sequence Check")
-            dup_pks = df['PK'].value_counts()
-            multi_row_pks = dup_pks[dup_pks > 1]
-            
-            if not multi_row_pks.empty:
-                sample_pk = multi_row_pks.index[0]
-                sample_rows = df[df['PK'] == sample_pk].sort_values('chain_sequence_order')
-                
-                if sample_rows['chain_sequence_order'].nunique() > 1:
-                    st.info("💡 PK groups multiple rows with different sequence orders.")
-                else:
-                    st.warning("⚠️ PK groups rows, but they ALL have the SAME sequence order.")
-            
-            # Check 3: Content Duplication
-            st.write("### 3. Content Duplication Check (Body)")
-            if 'Body' in df.columns:
-                body_dupes = df[df.duplicated(subset=['PK', 'Body'], keep=False)]
-                
-                if not body_dupes.empty:
-                    st.warning(f"⚠️ **Redundancy Found:** {len(body_dupes)} rows share the same 'PK' AND 'Body'.")
-                    st.write("This means the exact same text is repeated within threads.")
-                else:
-                    st.success("✅ No Content Duplicates: Every row within a PK thread has a unique Body.")
-                
-                # --- NEW TEST REQUESTED: EVOLUTION ---
-                st.write("### 4. Content Evolution Check (The 'Other' Rows)")
-                # We want to analyze threads that have >1 unique body to understand the rows that AREN'T pure duplicates
-                
-                # Group by PK and count unique Bodies
-                pk_body_counts = df.groupby('PK')['Body'].nunique()
-                # Filter for threads with variation (more than 1 unique body)
-                evolving_pks = pk_body_counts[pk_body_counts > 1].index
-                
-                st.write(f"**Number of Threads with Multiple Different Bodies:** {len(evolving_pks)}")
-                
-                if len(evolving_pks) > 0:
-                    st.info(f"💡 Found {len(evolving_pks)} threads that contain varying content (evolution).")
-                    
-                    # Show sample
-                    sample_evo_pk = evolving_pks[0]
-                    st.write(f"**Example of Evolution (PK={sample_evo_pk}):**")
-                    
-                    evo_rows = df[df['PK'] == sample_evo_pk][['PK', 'chain_sequence_order', 'Body']]
-                    st.dataframe(evo_rows.sort_values('chain_sequence_order'))
-                else:
-                    st.write("ℹ️ No threads show content evolution. (All rows within a thread are either single or identical duplicates).")
-
-            else:
-                st.error("❌ Cannot check content: 'Body' column missing.")
-
-    # --- DIAGNOSTIC END ---
-
-    # --- REFACTORING START: Chain Sequence Logic ---
-    
-    # 1. Test: Check if the column exists
-    has_chain_col = "chain_sequence_order" in df.columns
-    
-    # 2. Test: Check if all unique PKs have a valid chain_sequence_order
-    # Logic: Compare the Set of ALL PKs vs. the Set of PKs where sequence is NOT NULL
-    data_valid = False
-    
-    if has_chain_col:
-        # Debug information requested
-        st.caption(f"Debug - Column Type: {df['chain_sequence_order'].dtype}")
-        
-        unique_pks = set(df["PK"].unique())
-        # Get PKs where sequence order is present (not NaN)
-        pks_with_chain = set(df[df["chain_sequence_order"].notna()]["PK"].unique())
-        
-        # Validation: Sets must match exactly
-        if unique_pks == pks_with_chain and len(unique_pks) > 0:
-            data_valid = True
-
-    # 3. Apply Filter (if tests passed)
-    if data_valid:
-        # A. Sort by chain_sequence_order descending (Highest first)
-        df_sorted = df.sort_values(by="chain_sequence_order", ascending=False)
-        
-        # B. Drop duplicates on PK, keeping the 'first' (which is now the highest order)
-        df_clean = df_sorted.drop_duplicates(subset=["PK"], keep="first")
-        
-        st.caption(f"✅ Sequence Logic Applied: Filtered {len(df)} rows down to {len(df_clean)} unique documents (Highest Order).")
-        df = df_clean # Update df reference to use the cleaned data
-    else:
-        # Optional: Info message if validation fails (useful for debugging)
-        if has_chain_col:
-            st.caption("ℹ️ Sequence Filter Skipped: Not all documents have a valid chain order.")
-            
-    # --- REFACTORING END ---
-
-    # Filter for selected IDs using the (potentially) cleaned dataframe
+    # Filter for selected IDs using the cleaned dataframe
     matched = df[df['PK'].isin(ids)]
     
     st.subheader(f"Analyzing {len(matched)} Documents")
+    
     if not matched.empty:
         context = ""
         for _, row in matched.iterrows():
-            # Robust extraction: tries 'email_content', falls back to 'Body'
-            content_val = row.get('email_content') or row.get('Body') or 'No Content'
+            # Simplified extraction: Uses 'Body' as the source of truth
+            content_val = row.get('Body') or 'No Content'
             context += f"ID: {row['PK']}\nContent: {content_val}\n---\n"
             
         with st.expander("Raw Content"):
@@ -1630,6 +1543,7 @@ def screen_analysis():
             llm = get_cached_llm(st.session_state.app_state["mistral_key"])
             resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
             st.info(resp.content)
+    
 # --- MAIN NAVIGATION ---
 def inject_custom_css():
     """
