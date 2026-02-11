@@ -740,15 +740,49 @@ def get_cached_llm(api_key):
 
 @st.cache_data
 def load_github_data():
-    """Loads external context data efficiently."""
+    """
+    Loads external context data efficiently and performs deduplication logic.
+    Also synthetically creates 'Bates_Identity' and ensures 'Text Link' exists.
+    """
     url = "https://raw.githubusercontent.com/ssopic/some_data/main/sum_data.csv"
     try:
         df = pd.read_csv(url)
-        # Robust cleaning: convert to string, remove potential '.0' from floats, and strip whitespace
+        
+        # 1. Basic Cleaning
+        # Convert PK to string, remove potential '.0' from floats, and strip whitespace
         df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        
+        # 2. Bates & Link Column Handling
+        # The source data might not have these columns, so we initialize them if missing.
+        for col in ['Bates Begin', 'Bates End', 'Text Link']:
+            if col not in df.columns:
+                df[col] = "" # Initialize if missing
+            # Clean: to string, remove float decimals, strip whitespace
+            df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            
+        # 3. Create Bates Identity (User Requirement)
+        # Since 'Bates Identity' does not exist in source, we construct it: "Begin End"
+        df['Bates_Identity'] = df['Bates Begin'] + " " + df['Bates End']
+        # Fallback: If result is just whitespace (missing bates), use "Doc_PK" to ensure UI has a label
+        df['Bates_Identity'] = df['Bates_Identity'].apply(lambda x: x if x.strip() else None)
+        df['Bates_Identity'] = df['Bates_Identity'].fillna("Doc_" + df['PK'])
+        
+        # 4. Sequence Logic Processing
+        if 'chain_sequence_order' in df.columns:
+            # Ensure sequence is numeric for correct sorting
+            df['chain_sequence_order'] = pd.to_numeric(df['chain_sequence_order'], errors='coerce')
+            
+            # Sort by sequence descending (Highest first)
+            df = df.sort_values(by="chain_sequence_order", ascending=False)
+            
+            # Drop duplicates on PK, keeping the 'first' (highest sequence)
+            df = df.drop_duplicates(subset=["PK"], keep="first")
+            
         return df
     except Exception as e:
-        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body","chain_sequence_order"])
+        # Fallback empty dataframe structure with all required columns
+        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body", "Text Link", "chain_sequence_order", "Bates_Identity"])
+
 
 # --- SCHEMA DEFINITIONS (Preserved from Old Version) ---
 
@@ -1502,69 +1536,64 @@ def screen_analysis():
         st.warning("No documents selected.")
         return
     
-    # Get the main dataframe
+    # Get the main dataframe (Already cleaned and has Bates_Identity)
     df = st.session_state.github_data
 
-    # --- REFACTORING START: Chain Sequence Logic ---
-    
-    # 1. Test: Check if the column exists
-    has_chain_col = "chain_sequence_order" in df.columns
-    
-    # 2. Test: Check if all unique PKs have a valid chain_sequence_order
-    # Logic: Compare the Set of ALL PKs vs. the Set of PKs where sequence is NOT NULL
-    data_valid = False
-    
-    if has_chain_col:
-        # Debug information requested
-        st.caption(f"Debug - Column Type: {df['chain_sequence_order'].dtype}")
-        st.caption(f"Debug - Unique Values: {df['chain_sequence_order'].unique()}")
-        
-        unique_pks = set(df["PK"].unique())
-        # Get PKs where sequence order is present (not NaN)
-        pks_with_chain = set(df[df["chain_sequence_order"].notna()]["PK"].unique())
-        
-        # Validation: Sets must match exactly
-        if unique_pks == pks_with_chain and len(unique_pks) > 0:
-            data_valid = True
-
-    # 3. Apply Filter (if tests passed)
-    if data_valid:
-        # A. Sort by chain_sequence_order descending (Highest first)
-        df_sorted = df.sort_values(by="chain_sequence_order", ascending=False)
-        
-        # B. Drop duplicates on PK, keeping the 'first' (which is now the highest order)
-        df_clean = df_sorted.drop_duplicates(subset=["PK"], keep="first")
-        
-        st.caption(f"✅ Sequence Logic Applied: Filtered {len(df)} rows down to {len(df_clean)} unique documents (Highest Order).")
-        df = df_clean # Update df reference to use the cleaned data
-    else:
-        # Optional: Info message if validation fails (useful for debugging)
-        if has_chain_col:
-            st.caption("ℹ️ Sequence Filter Skipped: Not all documents have a valid chain order.")
-            
-    # --- REFACTORING END ---
-
-    # Filter for selected IDs using the (potentially) cleaned dataframe
+    # Filter for selected IDs using the cleaned dataframe
     matched = df[df['PK'].isin(ids)]
     
     st.subheader(f"Analyzing {len(matched)} Documents")
+    
     if not matched.empty:
-        context = ""
+        # --- 1. Prepare LLM Context (Using Bates Identity) ---
+        llm_context = ""
         for _, row in matched.iterrows():
-            # Robust extraction: tries 'email_content', falls back to 'Body'
-            content_val = row.get('email_content') or row.get('Body') or 'No Content'
-            context += f"ID: {row['PK']}\nContent: {content_val}\n---\n"
+            # Use the synthetic Bates Identity
+            bates_id = row.get('Bates_Identity', 'Unknown Doc')
+            body_text = row.get('Body') or 'No Content'
+            # Update Context to use Bates ID instead of PK
+            llm_context += f"Document: {bates_id}\nContent: {body_text}\n---\n"
+
+        # --- 2. Document Reader Interface ---
+        # Selectbox allows user to view specific doc details without filtering LLM context
+        doc_options = matched['Bates_Identity'].tolist()
+        
+        # Dropdown to select document
+        selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
+        
+        # Find the row corresponding to selection
+        if selected_bates:
+            # Safe retrieval of the specific row
+            view_row = matched[matched['Bates_Identity'] == selected_bates].iloc[0]
             
-        with st.expander("Raw Content"):
-            st.text_area("Context", context, height=200)
+            # Metadata Display
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([1, 1, 2])
+                c1.metric("Bates Begin", view_row['Bates Begin'])
+                c2.metric("Bates End", view_row['Bates End'])
+                # Text Link display (Read-only or Link if valid URL)
+                link_val = view_row['Text Link']
+                if link_val and link_val.startswith('http'):
+                    c3.link_button("Open Text Link", link_val)
+                else:
+                    c3.text_input("Text Link", value=link_val if link_val else "N/A", disabled=True)
+            
+            # Content Display
+            st.caption("Document Body")
+            st.text_area("Body content", view_row.get('Body', ''), height=300, label_visibility="collapsed", disabled=True)
+            
+        # --- 3. Chat Interface ---
+        # Optional: Show what the LLM sees
+        with st.expander("View LLM Context (Bates Format)"):
+            st.text(llm_context)
             
         q = st.chat_input("Ask about this evidence:")
         if q:
-            # Assuming get_cached_llm is available in the global scope of streamlit_app.py
+            # Assuming get_cached_llm is available
             llm = get_cached_llm(st.session_state.app_state["mistral_key"])
-            resp = llm.invoke(f"Context:\n{context}\n\nQuestion: {q}")
+            resp = llm.invoke(f"Context:\n{llm_context}\n\nQuestion: {q}")
             st.info(resp.content)
-
+    
 # --- MAIN NAVIGATION ---
 def inject_custom_css():
     """
