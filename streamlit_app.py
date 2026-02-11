@@ -361,10 +361,10 @@ def render_explorer_workspace(selector_type, selected_items):
     accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
     # --- Hacker / Cyberpunk Color Palette ---
-    COLOR_ROOT = "#FF2E63"          # Neon Pink/Red for Subjects (The "Pop")
+    COLOR_ROOT = "#FF8C00"          # Amber
     COLOR_RELATIONSHIP = "#4E545C"  # Gunmetal/Cool Gray for Connections (Modern Dark Mode)
     COLOR_TARGET = "#00ADB5"        # Vivid Teal for Objects (Matches CSS Accent)
-    COLOR_BORDER = "#0E1117"        # Dark borders (matching bg) or White. Let's use White for high contrast pop.
+    #COLOR_BORDER = "#0E1117"        # Dark borders (matching bg) or White. Let's use White for high contrast pop.
     COLOR_BORDER = "#FFFFFF"
 
     c_mid, c_right = st.columns([2, 1])
