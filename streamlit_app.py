@@ -413,33 +413,53 @@ def render_explorer_workspace(selector_type, selected_items):
              st.error("Data columns missing for visualization.")
              return
 
-        # 3. Dynamic Color Mapping Logic
-        color_map = {}
-
-        # Layer 1 (Root): Distinct Pastel Colors (The Rainbow)
+        # 3. Dynamic Color Mapping Logic (Root Layer Only)
+        # We pre-calculate root colors to map them by name later
+        root_color_map = {}
         unique_roots = sorted(df[root_col].unique()) if root_col in df.columns else []
-        root_colors = px.colors.qualitative.Pastel * (len(unique_roots) // len(px.colors.qualitative.Pastel) + 1)
-        for name, color in zip(unique_roots, root_colors):
-            color_map[name] = color
-
-        # Layer 2 (Middle): Single Static Gray (The Bridge)
-        if mid_col in df.columns:
-            for val in df[mid_col].unique():
-                color_map[val] = COLOR_RELATIONSHIP
-
-        # Layer 3 (Leaf): Single Static Teal (The Destination)
-        if leaf_col in df.columns:
-            for val in df[leaf_col].unique():
-                color_map[val] = COLOR_TARGET
+        root_colors_palette = px.colors.qualitative.Pastel * (len(unique_roots) // len(px.colors.qualitative.Pastel) + 1)
+        for name, color in zip(unique_roots, root_colors_palette):
+            root_color_map[name] = color
 
         # 4. Plot Generation
+        # We DO NOT set color here to avoid gradient. We will manually override colors next.
         fig = px.sunburst(
             df, 
             path=valid_path, 
             values='count',
-            hover_data=hover_cols,
-            color_discrete_map=color_map 
+            hover_data=hover_cols
         )
+
+        # 5. Post-Process Colors (The "Layer" Logic)
+        # Iterate through the generated IDs to assign colors based on depth
+        try:
+            sunburst_ids = fig.data[0]['ids']
+            colors = []
+            
+            for id_str in sunburst_ids:
+                # Plotly Express generates IDs like "Root/Child/Grandchild"
+                # We count slashes to determine depth
+                depth = id_str.count('/')
+                
+                if depth == 0:
+                    # Root Layer -> Use distinct Pastel map
+                    # The ID at depth 0 is just the name of the root
+                    colors.append(root_color_map.get(id_str, '#888888'))
+                elif depth == 1:
+                    # Middle Layer (Relationship) -> Uniform Gray
+                    colors.append(COLOR_RELATIONSHIP)
+                elif depth >= 2:
+                    # Leaf Layer (Target) -> Uniform Teal
+                    colors.append(COLOR_TARGET)
+                else:
+                    colors.append('#888888') # Fallback
+
+            # Apply the manually constructed color list
+            fig.update_traces(marker=dict(colors=colors))
+            
+        except Exception as e:
+            # Fallback if ID parsing fails
+            pass
 
         fig.update_layout(
             margin=dict(t=0, l=0, r=0, b=0), 
@@ -456,7 +476,7 @@ def render_explorer_workspace(selector_type, selected_items):
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # 5. Glossary
+        # 6. Glossary
         visible_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         
         with st.expander("📖 Relationship Glossary", expanded=False):
@@ -485,7 +505,7 @@ def render_explorer_workspace(selector_type, selected_items):
             key="filter_edge_multi"
         )
 
-        # Clean selection back to raw values
+        # Clean selection back to raw values for filtering
         selected_edges = [e.replace("⬜ ", "") for e in selected_edges_fmt]
 
         if not selected_edges:
@@ -505,7 +525,7 @@ def render_explorer_workspace(selector_type, selected_items):
             key="filter_target_multi"
         )
 
-        # Clean selection back to raw values
+        # Clean selection back to raw values for filtering
         selected_targets = [t.replace("🟦 ", "") for t in selected_targets_fmt]
 
         if not selected_targets:
@@ -572,6 +592,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
         st.caption(f"Total items in Evidence Cart: {current_count}")
+
 
         
 # ==========================================
