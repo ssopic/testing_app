@@ -876,9 +876,17 @@ def screen_databook():
         )
         
 # ==========================================
-# 0. NON UPDATED PARTS
+# 0. NON ORGANIZED PARTS
 # ==========================================
 
+#WELCOME BUTTON
+@st.dialog("Welcome")
+def show_welcome_popup():
+    # 2. Add welcome pop up
+    st.write("Welcome")
+    if st.button("Get Started"):
+        st.session_state.welcome_shown = True
+        st.rerun()
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
 
@@ -2155,6 +2163,10 @@ def main():
         if st.button("⚙️ Settings"):
             show_settings_dialog()
         return
+        
+    # Welcome button
+    if "welcome_shown" not in st.session_state:
+        show_welcome_popup()
 
     # 3. Cockpit Layout (3 Columns)
     # Ratios: [1.2, 8, 1.2]
