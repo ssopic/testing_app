@@ -668,8 +668,9 @@ def render_explorer_workspace(selector_type, selected_items):
         unique_ids = list(set(all_ids))
         string = "Documents Found: " + str(len(unique_ids)) 
         st.text(string)
-        with st.expander("Preview ID List", expanded=False):
-            st.write(unique_ids)
+        # Uncomment to allow the preview of ID lists in the app. Useful for debugging
+        # with st.expander("Preview ID List", expanded=False):
+        #     st.write(unique_ids)
 
         st.markdown(accent_line, unsafe_allow_html=True)
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
@@ -699,9 +700,9 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
-
-        current_count = len(st.session_state.app_state.get("evidence_locker", []))
-        st.caption(f"Total items in Evidence Cart: {current_count}")
+        # If you see this again. You can remove it.
+        # current_count = len(st.session_state.app_state.get("evidence_locker", []))
+        # st.caption(f"Total items in Evidence Cart: {current_count}")
 
         
 # ==========================================
