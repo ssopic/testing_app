@@ -1666,42 +1666,80 @@ def screen_extraction():
 @st.fragment
 def screen_locker():
     st.title("Evidence Cart")
-    locker = st.session_state.app_state["evidence_locker"]
+    locker = st.session_state.app_state.get("evidence_locker", [])
     
     if not locker:
         st.info("Locker is empty.")
         return
 
-    # 1. Initialize local selection set
+    # 1. Initialize current selection session state if needed
     current_selection = set()
-    
-    # 2. Retrieve previously selected IDs to restore checkbox state
     global_selected = st.session_state.app_state.get("selected_ids", set())
 
     for i, entry in enumerate(locker):
         with st.container(border=True):
-            c1, c2 = st.columns([0.1, 0.9])
+            c1, c2 = st.columns([0.15, 0.85])
+            
+            # Preparation for Checkbox Persistence
+            entry_ids_str = {str(pid) for pid in entry["ids"]}
+            is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
             with c1:
-                # 3. Logic: If the entry's IDs are already in the global set, check the box.
-                # We convert entry IDs to a set of strings to compare.
-                entry_ids_str = {str(pid) for pid in entry["ids"]}
-                
-                # Check if this batch is already selected (subset of global selection)
-                is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
-
-                # 4. Render Checkbox with `value=` set to restored state
+                # The user-facing selection functionality
                 is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
-                
-                if is_sel: 
-                    # If checked (either by user or restored state), add to current set
-                    for pid in entry["ids"]: 
+                if is_sel:
+                    # Keep propagation alive by adding all IDs to the selection set
+                    for pid in entry["ids"]:
                         current_selection.add(str(pid))
+            
             with c2:
-                st.write(f"**Query:** {entry['query']}")
-                st.caption(f"Found IDs: {', '.join(entry['ids'])}")
+                st.markdown(f"**Query:** {entry['query']}")
+                # COSMETIC CHANGE: Show count instead of the full ID list
+                st.markdown(f"**Evidence Count:** `{len(entry['ids'])} documents`")
+                st.caption(f"Summary: {entry.get('answer', 'No description available.')}")
 
-    # 5. Commit to Global State
+    # Commit selection back to the global state for the analyst
     st.session_state.app_state["selected_ids"] = current_selection
+# testing the new variant. if you see this remove it.
+# @st.fragment
+# def screen_locker():
+#     st.title("Evidence Cart")
+#     locker = st.session_state.app_state["evidence_locker"]
+    
+#     if not locker:
+#         st.info("Locker is empty.")
+#         return
+
+#     # 1. Initialize local selection set
+#     current_selection = set()
+    
+#     # 2. Retrieve previously selected IDs to restore checkbox state
+#     global_selected = st.session_state.app_state.get("selected_ids", set())
+
+#     for i, entry in enumerate(locker):
+#         with st.container(border=True):
+#             c1, c2 = st.columns([0.1, 0.9])
+#             with c1:
+#                 # 3. Logic: If the entry's IDs are already in the global set, check the box.
+#                 # We convert entry IDs to a set of strings to compare.
+#                 entry_ids_str = {str(pid) for pid in entry["ids"]}
+                
+#                 # Check if this batch is already selected (subset of global selection)
+#                 is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
+#                 # 4. Render Checkbox with `value=` set to restored state
+#                 is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
+                
+#                 if is_sel: 
+#                     # If checked (either by user or restored state), add to current set
+#                     for pid in entry["ids"]: 
+#                         current_selection.add(str(pid))
+#             with c2:
+#                 st.write(f"**Query:** {entry['query']}")
+#                 st.caption(f"Found IDs: {', '.join(entry['ids'])}")
+
+#     # 5. Commit to Global State
+#     st.session_state.app_state["selected_ids"] = current_selection
 
 @st.fragment
 def screen_analysis():
