@@ -111,7 +111,7 @@ def fetch_inventory_from_db():
                 q_entities = f"""
                 MATCH (n:`{label}`)
                 WHERE n.name IS NOT NULL
-                AND EXISTS {{ (n)-[r]->() WHERE type(r) <> 'MENTIONED_IN' }}
+                AND EXISTS {{ (n)-[r]-() WHERE type(r) <> 'MENTIONED_IN' }}
                 RETURN DISTINCT n.name as name
                 """
                 names_entities = [r["name"] for r in session.run(q_entities)]
@@ -161,7 +161,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
             if selector_type == "Connections":
                 # Strict Semantic: Exclude MENTIONED_IN entirely
                 query = """
-                MATCH (n)-[r]->(m)
+                MATCH (n)-[r]-(m)
                 WHERE type(r) IN $names 
                   AND type(r) <> 'MENTIONED_IN'
                 RETURN 
@@ -200,7 +200,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 # Hybrid: Fetch EVERYTHING (Semantic + Lexical)
                 # We do NOT filter out MENTIONED_IN here because we need it for the subtraction logic.
                 query = f"""
-                MATCH (n:`{label}`)-[r]->(m)
+                MATCH (n:`{label}`)-[r]-(m)
                 WHERE n.name IN $names
                 RETURN 
                     type(r) as edge, 
