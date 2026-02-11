@@ -111,7 +111,7 @@ def fetch_inventory_from_db():
                 q_entities = f"""
                 MATCH (n:`{label}`)
                 WHERE n.name IS NOT NULL
-                AND EXISTS {{ (n)-[r]->() WHERE type(r) <> 'MENTIONED_IN' }}
+                AND EXISTS {{ (n)-[r]-() WHERE type(r) <> 'MENTIONED_IN' }}
                 RETURN DISTINCT n.name as name
                 """
                 names_entities = [r["name"] for r in session.run(q_entities)]
@@ -161,7 +161,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
             if selector_type == "Connections":
                 # Strict Semantic: Exclude MENTIONED_IN entirely
                 query = """
-                MATCH (n)-[r]->(m)
+                MATCH (n)-[r]-(m)
                 WHERE type(r) IN $names 
                   AND type(r) <> 'MENTIONED_IN'
                 RETURN 
@@ -200,7 +200,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 # Hybrid: Fetch EVERYTHING (Semantic + Lexical)
                 # We do NOT filter out MENTIONED_IN here because we need it for the subtraction logic.
                 query = f"""
-                MATCH (n:`{label}`)-[r]->(m)
+                MATCH (n:`{label}`)-[r]-(m)
                 WHERE n.name IN $names
                 RETURN 
                     type(r) as edge, 
@@ -360,12 +360,11 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
 def render_explorer_workspace(selector_type, selected_items):
     accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
-    # --- Hacker / Cyberpunk Color Palette ---
-    COLOR_ROOT = "#FF8C00"          # Amber
-    COLOR_RELATIONSHIP = "#4E545C"  # Gunmetal/Cool Gray for Connections (Modern Dark Mode)
-    COLOR_TARGET = "#00ADB5"        # Vivid Teal for Objects (Matches CSS Accent)
-    #COLOR_BORDER = "#0E1117"        # Dark borders (matching bg) or White. Let's use White for high contrast pop.
-    COLOR_BORDER = "#FFFFFF"
+    # --- Accessible Hacker Palette ---
+    COLOR_ROOT = "#FF8C00"          # Amber (Subject)
+    COLOR_RELATIONSHIP = "#4E545C"  # Gunmetal Gray (Relationship)
+    COLOR_TARGET = "#00ADB5"        # Teal (Object)
+    COLOR_BORDER = "#FFFFFF"        # White borders
 
     c_mid, c_right = st.columns([2, 1])
     
@@ -375,12 +374,13 @@ def render_explorer_workspace(selector_type, selected_items):
             return
 
         names = [item['name'] for item in selected_items]
-        # testing the new legend logic
+        
+        # --- Dynamic Legend ---
         if selector_type == "Connections":
             # Hierarchy: Edge (Gray) -> Source (Amber) -> Target (Teal)
             legend_items = [
-                (COLOR_RELATIONSHIP, "Relationship (⬜)", "Layer 1: The Connection (Root)", "border: 1px solid #666;"),
-                (COLOR_ROOT, "Subject", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
+                (COLOR_RELATIONSHIP, "Relationship", "Layer 1: The Connection (Root)", "border: 1px solid #666;"),
+                (COLOR_ROOT, "Subject (🟠)", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
                 (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
             ]
         else:
@@ -397,14 +397,6 @@ def render_explorer_workspace(selector_type, selected_items):
         legend_html += '</div>'
         
         st.markdown(legend_html, unsafe_allow_html=True)
-        # # --- Custom Legend (Updated for Single Colors) ---
-        # st.markdown(f"""
-        # <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
-        #     <span style="display: flex; align-items: center;" title="Layer 1: The Source Entity"><span style="width: 12px; height: 12px; background: {COLOR_ROOT}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_ROOT};"></span>Subject</span>
-        #     <span style="display: flex; align-items: center;" title="Layer 2: The Action/Connection"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Relationship (⬜)</span>
-        #     <span style="display: flex; align-items: center;" title="Layer 3: The Target Entity"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_TARGET};"></span>Object Type (🟦)</span>
-        # </div>
-        # """, unsafe_allow_html=True)
 
         # 1. Fetch Data
         df = fetch_sunburst_data(selector_type, selected_items)
@@ -423,11 +415,9 @@ def render_explorer_workspace(selector_type, selected_items):
         if selector_type == "Connections":
             # Hierarchy: Edge -> Source -> Target
             path = ['edge', 'source_node_label', 'connected_node_label']
-            root_col, mid_col, leaf_col = 'edge', 'source_node_label', 'connected_node_label'
         else:
             # Hierarchy: Name -> Edge -> Target
             path = ['node_name', 'edge', 'connected_node_label']
-            root_col, mid_col, leaf_col = 'node_name', 'edge', 'connected_node_label'
 
         valid_path = [col for col in path if col in df.columns]
         
@@ -435,7 +425,7 @@ def render_explorer_workspace(selector_type, selected_items):
              st.error("Data columns missing for visualization.")
              return
 
-        # 3. Plot Generation (No Color Map needed here, we override manually)
+        # 3. Plot Generation
         fig = px.sunburst(
             df, 
             path=valid_path, 
@@ -443,7 +433,7 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_data=hover_cols
         )
 
-        # 4. Post-Process Colors (The "Layer" Logic - HACKER MODE)
+        # 4. Post-Process Colors (Semantic Layer Logic)
         try:
             sunburst_ids = fig.data[0]['ids']
             colors = []
@@ -451,7 +441,6 @@ def render_explorer_workspace(selector_type, selected_items):
             for id_str in sunburst_ids:
                 depth = id_str.count('/')
                 
-                # Assign colors based on semantic meaning, not just depth
                 if selector_type == "Connections":
                     # Structure: Relationship -> Subject -> Object
                     if depth == 0:
@@ -477,6 +466,7 @@ def render_explorer_workspace(selector_type, selected_items):
             fig.update_traces(marker=dict(colors=colors))
             
         except Exception as e:
+            # Fallback if ID parsing fails
             pass
 
         # 5. Styling & UX
@@ -489,7 +479,6 @@ def render_explorer_workspace(selector_type, selected_items):
         )
         
         fig.update_traces(
-            # White borders make the colors pop against each other
             marker=dict(line=dict(color=COLOR_BORDER, width=2)),
             hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>"
         )
@@ -509,49 +498,104 @@ def render_explorer_workspace(selector_type, selected_items):
 
     with c_right:
         st.subheader("Filter Data", divider = "gray")
-        st.caption("Filter by Relationships and Target Types")
 
-        # --- Visual Filters ---
+        # --- Conditional Filtering Logic ---
         
-        # Filter 1: Relationships (White Square)
-        raw_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-        edge_options = [f"⬜ {e}" for e in raw_edges] # Add visual indicator
-        
-        selected_edges_fmt = st.multiselect(
-            "Filter by Connection Type:",
-            options=edge_options,
-            default=[], 
-            placeholder="Select connections...",
-            key="filter_edge_multi"
-        )
+        if selector_type == "Text Mentions":
+            # CASE C: No Filters for Lexical
+            st.caption("Standard Extraction: Entities found in Documents via 'MENTIONED_IN'.")
+            st.info("No filters applicable.")
+            final_filtered_df = df
 
-        # Clean selection back to raw values for filtering
-        selected_edges = [e.replace("⬜ ", "") for e in selected_edges_fmt]
-
-        if not selected_edges:
-            filtered_df_step1 = df
-        else:
-            filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+        elif selector_type == "Connections":
+            # CASE B: Connections Mode (Filter by Nodes, not Relationships)
+            st.caption("Filter by Source and Target Nodes")
             
-        # Filter 2: Targets (Blue Square)
-        raw_targets = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
-        target_options = [f"🟦 {t}" for t in raw_targets] # Add visual indicator
+            # Filter 1: Source Node (Subject - Amber)
+            if 'source_node_label' in df.columns:
+                raw_sources = sorted(df['source_node_label'].unique())
+                source_options = [f"🟠 {s}" for s in raw_sources]
+                
+                selected_sources_fmt = st.multiselect(
+                    "Filter by Source Type:",
+                    options=source_options,
+                    default=[], 
+                    placeholder="Select source types...",
+                    key="filter_source_multi"
+                )
+                selected_sources = [s.replace("🟠 ", "") for s in selected_sources_fmt]
+                
+                if not selected_sources:
+                    filtered_df_step1 = df
+                else:
+                    filtered_df_step1 = df[df['source_node_label'].isin(selected_sources)]
+            else:
+                filtered_df_step1 = df
 
-        selected_targets_fmt = st.multiselect(
-            "Filter by Target Type:",
-            options=target_options,
-            default=[], 
-            placeholder="Select targets...",
-            key="filter_target_multi"
-        )
+            # Filter 2: Target Node (Object - Teal)
+            if 'connected_node_label' in filtered_df_step1.columns:
+                raw_targets = sorted(filtered_df_step1['connected_node_label'].unique())
+                target_options = [f"🟦 {t}" for t in raw_targets]
 
-        # Clean selection back to raw values for filtering
-        selected_targets = [t.replace("🟦 ", "") for t in selected_targets_fmt]
+                selected_targets_fmt = st.multiselect(
+                    "Filter by Target Type:",
+                    options=target_options,
+                    default=[], 
+                    placeholder="Select target types...",
+                    key="filter_target_multi"
+                )
+                selected_targets = [t.replace("🟦 ", "") for t in selected_targets_fmt]
 
-        if not selected_targets:
-            final_filtered_df = filtered_df_step1
+                if not selected_targets:
+                    final_filtered_df = filtered_df_step1
+                else:
+                    final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+            else:
+                final_filtered_df = filtered_df_step1
+
         else:
-            final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+            # CASE A: Entities Mode (Standard Logic)
+            st.caption("Filter by Relationships and Target Types")
+
+            # Filter 1: Relationship (Gray)
+            raw_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
+            edge_options = [f"⬜ {e}" for e in raw_edges]
+            
+            selected_edges_fmt = st.multiselect(
+                "Filter by Connection Type:",
+                options=edge_options,
+                default=[], 
+                placeholder="Select connections...",
+                key="filter_edge_multi"
+            )
+            selected_edges = [e.replace("⬜ ", "") for e in selected_edges_fmt]
+
+            if not selected_edges:
+                filtered_df_step1 = df
+            else:
+                filtered_df_step1 = df[df['edge'].isin(selected_edges)]
+                
+            # Filter 2: Target Node (Object - Teal)
+            if 'connected_node_label' in filtered_df_step1.columns:
+                raw_targets = sorted(filtered_df_step1['connected_node_label'].unique())
+                target_options = [f"🟦 {t}" for t in raw_targets]
+
+                selected_targets_fmt = st.multiselect(
+                    "Filter by Target Type:",
+                    options=target_options,
+                    default=[], 
+                    placeholder="Select target types...",
+                    key="filter_target_multi"
+                )
+                selected_targets = [t.replace("🟦 ", "") for t in selected_targets_fmt]
+
+                if not selected_targets:
+                    final_filtered_df = filtered_df_step1
+                else:
+                    final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
+            else:
+                final_filtered_df = filtered_df_step1
+
 
         # --- ID Extraction & Evidence Cart ---
         def deep_flatten(container):
@@ -587,17 +631,15 @@ def render_explorer_workspace(selector_type, selected_items):
                     name_str = names[0]
                     
                 query_desc = f"Manual Explorer: {name_str}"
-                filters = []
                 
-                if selected_edges:
-                    filters.append(f"Edges: {', '.join(selected_edges)}")
+                # Dynamic Description for Cart
+                filters_desc = []
+                if selector_type == "Connections":
+                    # We can't easily access the selected variables from inside the if block above
+                    # without initializing them outside. But for brevity:
+                    # We'll rely on the user seeing what they filtered. 
+                    pass 
                 
-                if selected_targets:
-                    filters.append(f"Targets: {', '.join(selected_targets)}")
-                
-                if filters:
-                    query_desc += f" ({'; '.join(filters)})"
-
                 payload = {
                     "query": query_desc,
                     "answer": f"Visual discovery found {len(unique_ids)} related documents.",
@@ -612,7 +654,6 @@ def render_explorer_workspace(selector_type, selected_items):
 
         current_count = len(st.session_state.app_state.get("evidence_locker", []))
         st.caption(f"Total items in Evidence Cart: {current_count}")
-
 
         
 # ==========================================
