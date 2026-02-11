@@ -358,9 +358,9 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.fragment
 def render_explorer_workspace(selector_type, selected_items):
-    #css details
     accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
-    #Colors for the Sentence Structure Visualization
+
+    # Colors for the Sentence Structure Visualization
     COLOR_RELATIONSHIP = "#D3D3D3"  # Light Gray for all Verbs
     COLOR_TARGET = "#00ADB5"        # Teal for all Objects
     COLOR_BORDER = "#FFFFFF"        # White borders to cut the rings
@@ -373,88 +373,90 @@ def render_explorer_workspace(selector_type, selected_items):
             return
 
         names = [item['name'] for item in selected_items]
-        st.subheader(f"Analysis: {len(names)} Items")
+        
+        # --- Custom Legend ---
+        # Visual guide matching the chart layers and the filter icons
+        st.markdown(f"""
+        <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
+            <span style="display: flex; align-items: center;" title="Layer 1: The Source Entity"><span style="width: 12px; height: 12px; background: linear-gradient(to right, #FFB3BA, #FFDFBA, #FFFFBA, #BAFFC9, #BAE1FF); border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Subject</span>
+            <span style="display: flex; align-items: center;" title="Layer 2: The Action/Connection"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px; border: 1px solid #666;"></span>Relationship (⬜)</span>
+            <span style="display: flex; align-items: center;" title="Layer 3: The Target Entity"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Object Type (🟦)</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Fetch Data
+        # 1. Fetch Data
         df = fetch_sunburst_data(selector_type, selected_items)
 
         if df.empty:
             st.warning("No data found.")
             return
 
-        # Prepare Plotly Data
+        # 2. Prepare Path & Columns based on Selector
         if 'id_list' in df.columns:
             df['id_list_str'] = df['id_list'].astype(str)
             hover_cols = ['id_list_str']
         else:
             hover_cols = None
 
-        # --- DYNAMIC HIERARCHY BASED ON TYPE ---
         if selector_type == "Connections":
-            # Hierarchy: Edge Type -> Source Label -> Target Label
+            # Hierarchy: Edge -> Source -> Target
             path = ['edge', 'source_node_label', 'connected_node_label']
             root_col, mid_col, leaf_col = 'edge', 'source_node_label', 'connected_node_label'
         else:
-            # Hierarchy: Node Name -> Edge Type -> Target Label
-            # Used for both 'Entities' and 'Text Mentions' (to match structure)
+            # Hierarchy: Name -> Edge -> Target
             path = ['node_name', 'edge', 'connected_node_label']
             root_col, mid_col, leaf_col = 'node_name', 'edge', 'connected_node_label'
 
-        # Ensure columns exist before plotting
         valid_path = [col for col in path if col in df.columns]
         
         if not valid_path:
              st.error("Data columns missing for visualization.")
              return
-        unique_roots = df[root_col].unique() if root_col in df.columns else []
-        root_colors = px.colors.qualitative.Pastel * (len(unique_roots) // len(px.colors.qualitative.Pastel) + 1)
-        color_map = {name: color for name, color in zip(unique_roots, root_colors)}
 
-        # 2. Middle Layer (Verb): Single Static Gray
+        # 3. Dynamic Color Mapping Logic
+        color_map = {}
+
+        # Layer 1 (Root): Distinct Pastel Colors (The Rainbow)
+        unique_roots = sorted(df[root_col].unique()) if root_col in df.columns else []
+        root_colors = px.colors.qualitative.Pastel * (len(unique_roots) // len(px.colors.qualitative.Pastel) + 1)
+        for name, color in zip(unique_roots, root_colors):
+            color_map[name] = color
+
+        # Layer 2 (Middle): Single Static Gray (The Bridge)
         if mid_col in df.columns:
             for val in df[mid_col].unique():
                 color_map[val] = COLOR_RELATIONSHIP
 
-        # 3. Leaf Layer (Object): Single Static Teal
+        # Layer 3 (Leaf): Single Static Teal (The Destination)
         if leaf_col in df.columns:
             for val in df[leaf_col].unique():
                 color_map[val] = COLOR_TARGET
-        
+
+        # 4. Plot Generation
         fig = px.sunburst(
             df, 
             path=valid_path, 
             values='count',
             hover_data=hover_cols,
-            color_discrete_map=color_map  # [NEW] Apply the custom map
-            # Removed color='edge' to allow the map to dictate colors by label
+            color_discrete_map=color_map 
         )
 
-        # [MODIFIED] Styling & UX
         fig.update_layout(
             margin=dict(t=0, l=0, r=0, b=0), 
             height=500,
-            paper_bgcolor='rgba(0,0,0,0)', # [NEW] Transparent Background
-            plot_bgcolor='rgba(0,0,0,0)',  # [NEW] Transparent Background
-            font=dict(color="white")       # [NEW] White text
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',  
+            font=dict(color="white")       
         )
         
         fig.update_traces(
-            marker=dict(line=dict(color=COLOR_BORDER, width=2)), # [NEW] White borders
-            hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>" # [NEW] Tooltip prompt
+            marker=dict(line=dict(color=COLOR_BORDER, width=2)),
+            hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>"
         )
+        
         st.plotly_chart(fig, use_container_width=True)
-        # The legend needs to be added manually as plotly express sunburst does not allow for category based legends
-        st.markdown(f"""
-        <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
-            <span style="display: flex; align-items: center;"><span style="width: 12px; height: 12px; background: #FFB3BA; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Subject</span>
-            <span style="display: flex; align-items: center;"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Relationship</span>
-            <span style="display: flex; align-items: center;"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Object Type</span>
-        </div>
-        """, unsafe_allow_html=True)
 
-
-        # [INSERT GLOSSARY STEP HERE]
-        # It sits right under the chart, before we switch to the right column
+        # 5. Glossary
         visible_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
         
         with st.expander("📖 Relationship Glossary", expanded=False):
@@ -469,42 +471,49 @@ def render_explorer_workspace(selector_type, selected_items):
         st.subheader("Filter Data", divider = "gray")
         st.caption("Filter by Relationships and Target Types")
 
-        # --- UPDATED: Multi-Select Cascading Filters ---
+        # --- Visual Filters ---
         
-        # 1. Edge Filter (Multi)
-        edge_options = sorted(df['edge'].unique()) if 'edge' in df.columns else []
+        # Filter 1: Relationships (White Square)
+        raw_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
+        edge_options = [f"⬜ {e}" for e in raw_edges] # Add visual indicator
         
-        selected_edges = st.multiselect(
+        selected_edges_fmt = st.multiselect(
             "Filter by Connection Type:",
             options=edge_options,
-            default=[], # Empty implies "All"
-            placeholder="Select connection types (Empty = All)",
+            default=[], 
+            placeholder="Select connections...",
             key="filter_edge_multi"
         )
 
-        # 2. Target Label Filter (Multi)
+        # Clean selection back to raw values
+        selected_edges = [e.replace("⬜ ", "") for e in selected_edges_fmt]
+
         if not selected_edges:
             filtered_df_step1 = df
         else:
             filtered_df_step1 = df[df['edge'].isin(selected_edges)]
             
-        target_options = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
+        # Filter 2: Targets (Blue Square)
+        raw_targets = sorted(filtered_df_step1['connected_node_label'].unique()) if 'connected_node_label' in filtered_df_step1.columns else []
+        target_options = [f"🟦 {t}" for t in raw_targets] # Add visual indicator
 
-        selected_targets = st.multiselect(
+        selected_targets_fmt = st.multiselect(
             "Filter by Target Type:",
             options=target_options,
-            default=[], # Empty implies "All"
-            placeholder="Select target types (Empty = All)",
+            default=[], 
+            placeholder="Select targets...",
             key="filter_target_multi"
         )
 
-        # 3. Apply Final Filter
+        # Clean selection back to raw values
+        selected_targets = [t.replace("🟦 ", "") for t in selected_targets_fmt]
+
         if not selected_targets:
             final_filtered_df = filtered_df_step1
         else:
             final_filtered_df = filtered_df_step1[filtered_df_step1['connected_node_label'].isin(selected_targets)]
 
-        # 4. Flatten IDs
+        # --- ID Extraction & Evidence Cart ---
         def deep_flatten(container):
             for i in container:
                 if isinstance(i, list):
@@ -522,7 +531,6 @@ def render_explorer_workspace(selector_type, selected_items):
         with st.expander("Preview ID List", expanded=False):
             st.write(unique_ids)
 
-        # accent line
         st.markdown(accent_line, unsafe_allow_html=True)
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         
@@ -575,18 +583,15 @@ def screen_databook():
     
     inventory = fetch_inventory()
     
-    # Initialize persistent selection
     if "databook_selections" not in st.session_state:
         st.session_state.databook_selections = set()
 
     if "active_explorer_items" not in st.session_state:
         st.session_state.active_explorer_items = []
 
-    # Initialize last selector type to detect tab switches
     if "last_selector_type" not in st.session_state:
         st.session_state.last_selector_type = "Entities"
 
-    # Initialize RESET TOKEN to handle checkbox state clearing
     if "widget_reset_token" not in st.session_state:
         st.session_state.widget_reset_token = 0
 
@@ -599,7 +604,6 @@ def screen_databook():
         with st.container(border=True):
             st.subheader("Selector")
             
-            # 1. Mode Selection
             selector_type = st.radio(
                 "Analysis Mode", 
                 ["Entities", "Connections", "Text Mentions"], 
@@ -607,16 +611,12 @@ def screen_databook():
                 horizontal=True
             )
             
-            # Auto-Clean on Tab Switch
             if selector_type != st.session_state.last_selector_type:
                 st.session_state.databook_selections = set()
                 st.session_state.active_explorer_items = []
                 st.session_state.last_selector_type = selector_type
-                
-                # Increment reset token to force new widget instances
                 st.session_state.widget_reset_token += 1
                 
-                # Cleanup old keys to be safe
                 for key in list(st.session_state.keys()):
                     if key.startswith("chk_"):
                         del st.session_state[key]
@@ -625,7 +625,6 @@ def screen_databook():
 
             st.divider()
 
-            # 2. Controls: Visualize & Clear (Now active for all types)
             selection_count = len(st.session_state.databook_selections)
             
             c_vis, c_clear = st.columns([2, 1])
@@ -638,11 +637,8 @@ def screen_databook():
                 if st.button("Clear", use_container_width=True):
                     st.session_state.databook_selections = set()
                     st.session_state.active_explorer_items = []
-                    
-                    # Increment reset token to force new widget instances
                     st.session_state.widget_reset_token += 1
                     
-                    # Cleanup old keys
                     for key in list(st.session_state.keys()):
                         if key.startswith("chk_"):
                             del st.session_state[key]
@@ -651,7 +647,6 @@ def screen_databook():
 
             st.divider()
 
-            # 3. Scrollable List Container
             with st.container(height=400, border=False):
                 available_data = inventory.get(selector_type, {})
                 
@@ -661,7 +656,6 @@ def screen_databook():
                     if isinstance(available_data, dict):
                         token = st.session_state.widget_reset_token
 
-                        # --- OBJECT MODE (Entities OR Text Mentions) ---
                         if selector_type in ["Entities", "Text Mentions"]:
                             labels = sorted(list(available_data.keys()))
                             for label in labels:
@@ -669,7 +663,6 @@ def screen_databook():
                                 is_expanded = bool(st.session_state.get(search_key, ""))
 
                                 with st.expander(f"{label}", expanded=is_expanded):
-                                    # Clean data
                                     raw_vals = available_data[label]
                                     clean_names = []
                                     if isinstance(raw_vals, dict):
@@ -679,7 +672,6 @@ def screen_databook():
                                     names = sorted(list(set(str(n) for n in clean_names)))
                                     
                                     if names:
-                                        # UPDATED SEARCH BAR
                                         c_search, c_btn = st.columns([5, 1])
                                         with c_search:
                                             search_term = st.text_input(
@@ -696,14 +688,12 @@ def screen_databook():
                                         if not filtered_names:
                                             st.caption("No matches.")
                                         else:
-                                            # Truncate large lists
                                             display_names = filtered_names[:50] if (len(filtered_names) > 50 and not search_term) else filtered_names
                                             if len(filtered_names) > 50 and not search_term:
                                                 st.info(f"Showing 50 of {len(filtered_names)}.")
 
                                             for name in display_names:
                                                 is_selected = (label, name) in st.session_state.databook_selections
-                                                # KEY CHANGE: Include token in key to support force-resets
                                                 chk_key = f"chk_{token}_{selector_type}_{label}_{name}"
                                                 
                                                 def update_selection(l=label, n=name, k=chk_key):
@@ -716,7 +706,6 @@ def screen_databook():
                                     else:
                                         st.caption("No names.")
 
-                        # --- VERB MODE (Connections) ---
                         elif selector_type == "Connections":
                             rel_types = sorted(list(available_data.keys()))
                             if rel_types:
@@ -737,7 +726,6 @@ def screen_databook():
                                 
                                 for r_type in filtered_rels:
                                     is_selected = ("Connections", r_type) in st.session_state.databook_selections
-                                    # KEY CHANGE: Include token in key
                                     chk_key = f"chk_{token}_verb_{r_type}"
                                     
                                     def update_verb_selection(t=r_type, k=chk_key):
@@ -753,7 +741,6 @@ def screen_databook():
                         st.error("Invalid inventory format.")
 
     with c_workspace:
-        # Simplified: Render workspace for all types, as logic is now handled inside
         render_explorer_workspace(
             selector_type, 
             st.session_state.active_explorer_items
