@@ -375,15 +375,36 @@ def render_explorer_workspace(selector_type, selected_items):
             return
 
         names = [item['name'] for item in selected_items]
+        # testing the new legend logic
+        if selector_type == "Connections":
+            # Hierarchy: Edge (Gray) -> Source (Amber) -> Target (Teal)
+            legend_items = [
+                (COLOR_RELATIONSHIP, "Relationship (⬜)", "Layer 1: The Connection (Root)", "border: 1px solid #666;"),
+                (COLOR_ROOT, "Subject", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
+                (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+            ]
+        else:
+            # Hierarchy: Name (Amber) -> Edge (Gray) -> Target (Teal)
+            legend_items = [
+                (COLOR_ROOT, "Subject", "Layer 1: The Source Entity (Root)", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
+                (COLOR_RELATIONSHIP, "Relationship (⬜)", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
+                (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+            ]
+            
+        legend_html = '<div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">'
+        for col, label, title, style_extra in legend_items:
+             legend_html += f'<span style="display: flex; align-items: center;" title="{title}"><span style="width: 12px; height: 12px; background: {col}; border-radius: 50%; display: inline-block; margin-right: 5px; {style_extra}"></span>{label}</span>'
+        legend_html += '</div>'
         
-        # --- Custom Legend (Updated for Single Colors) ---
-        st.markdown(f"""
-        <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
-            <span style="display: flex; align-items: center;" title="Layer 1: The Source Entity"><span style="width: 12px; height: 12px; background: {COLOR_ROOT}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_ROOT};"></span>Subject</span>
-            <span style="display: flex; align-items: center;" title="Layer 2: The Action/Connection"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Relationship (⬜)</span>
-            <span style="display: flex; align-items: center;" title="Layer 3: The Target Entity"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_TARGET};"></span>Object Type (🟦)</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(legend_html, unsafe_allow_html=True)
+        # # --- Custom Legend (Updated for Single Colors) ---
+        # st.markdown(f"""
+        # <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
+        #     <span style="display: flex; align-items: center;" title="Layer 1: The Source Entity"><span style="width: 12px; height: 12px; background: {COLOR_ROOT}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_ROOT};"></span>Subject</span>
+        #     <span style="display: flex; align-items: center;" title="Layer 2: The Action/Connection"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Relationship (⬜)</span>
+        #     <span style="display: flex; align-items: center;" title="Layer 3: The Target Entity"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_TARGET};"></span>Object Type (🟦)</span>
+        # </div>
+        # """, unsafe_allow_html=True)
 
         # 1. Fetch Data
         df = fetch_sunburst_data(selector_type, selected_items)
@@ -428,26 +449,34 @@ def render_explorer_workspace(selector_type, selected_items):
             colors = []
             
             for id_str in sunburst_ids:
-                # Plotly Express IDs are "Root/Child/Grandchild"
                 depth = id_str.count('/')
                 
-                if depth == 0:
-                    # Root Layer -> Single Neon Pink
-                    colors.append(COLOR_ROOT)
-                elif depth == 1:
-                    # Middle Layer -> Cool Gray
-                    colors.append(COLOR_RELATIONSHIP)
-                elif depth >= 2:
-                    # Leaf Layer -> Vivid Teal
-                    colors.append(COLOR_TARGET)
+                # Assign colors based on semantic meaning, not just depth
+                if selector_type == "Connections":
+                    # Structure: Relationship -> Subject -> Object
+                    if depth == 0:
+                        colors.append(COLOR_RELATIONSHIP) # Root is Relation
+                    elif depth == 1:
+                        colors.append(COLOR_ROOT)         # Middle is Subject
+                    elif depth >= 2:
+                        colors.append(COLOR_TARGET)       # Outer is Object
+                    else:
+                        colors.append('#333333')
                 else:
-                    colors.append('#333333') # Fallback
+                    # Structure: Subject -> Relationship -> Object
+                    if depth == 0:
+                        colors.append(COLOR_ROOT)         # Root is Subject
+                    elif depth == 1:
+                        colors.append(COLOR_RELATIONSHIP) # Middle is Relation
+                    elif depth >= 2:
+                        colors.append(COLOR_TARGET)       # Outer is Object
+                    else:
+                        colors.append('#333333')
 
             # Apply the manually constructed color list
             fig.update_traces(marker=dict(colors=colors))
             
         except Exception as e:
-            # Fallback if ID parsing fails
             pass
 
         # 5. Styling & UX
