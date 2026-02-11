@@ -360,6 +360,10 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
 def render_explorer_workspace(selector_type, selected_items):
     #css details
     accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
+    #Colors for the Sentence Structure Visualization
+    COLOR_RELATIONSHIP = "#D3D3D3"  # Light Gray for all Verbs
+    COLOR_TARGET = "#00ADB5"        # Teal for all Objects
+    COLOR_BORDER = "#FFFFFF"        # White borders to cut the rings
 
     c_mid, c_right = st.columns([2, 1])
     
@@ -389,10 +393,12 @@ def render_explorer_workspace(selector_type, selected_items):
         if selector_type == "Connections":
             # Hierarchy: Edge Type -> Source Label -> Target Label
             path = ['edge', 'source_node_label', 'connected_node_label']
+            root_col, mid_col, leaf_col = 'edge', 'source_node_label', 'connected_node_label'
         else:
             # Hierarchy: Node Name -> Edge Type -> Target Label
             # Used for both 'Entities' and 'Text Mentions' (to match structure)
             path = ['node_name', 'edge', 'connected_node_label']
+            root_col, mid_col, leaf_col = 'node_name', 'edge', 'connected_node_label'
 
         # Ensure columns exist before plotting
         valid_path = [col for col in path if col in df.columns]
@@ -400,16 +406,64 @@ def render_explorer_workspace(selector_type, selected_items):
         if not valid_path:
              st.error("Data columns missing for visualization.")
              return
+        unique_roots = df[root_col].unique() if root_col in df.columns else []
+        root_colors = px.colors.qualitative.Pastel * (len(unique_roots) // len(px.colors.qualitative.Pastel) + 1)
+        color_map = {name: color for name, color in zip(unique_roots, root_colors)}
 
+        # 2. Middle Layer (Verb): Single Static Gray
+        if mid_col in df.columns:
+            for val in df[mid_col].unique():
+                color_map[val] = COLOR_RELATIONSHIP
+
+        # 3. Leaf Layer (Object): Single Static Teal
+        if leaf_col in df.columns:
+            for val in df[leaf_col].unique():
+                color_map[val] = COLOR_TARGET
+        
         fig = px.sunburst(
             df, 
             path=valid_path, 
             values='count',
-            color='edge' if 'edge' in df.columns else None,
-            hover_data=hover_cols
+            hover_data=hover_cols,
+            color_discrete_map=color_map  # [NEW] Apply the custom map
+            # Removed color='edge' to allow the map to dictate colors by label
         )
-        fig.update_layout(margin=dict(t=0, l=0, r=0, b=0), height=500)
+
+        # [MODIFIED] Styling & UX
+        fig.update_layout(
+            margin=dict(t=0, l=0, r=0, b=0), 
+            height=500,
+            paper_bgcolor='rgba(0,0,0,0)', # [NEW] Transparent Background
+            plot_bgcolor='rgba(0,0,0,0)',  # [NEW] Transparent Background
+            font=dict(color="white")       # [NEW] White text
+        )
+        
+        fig.update_traces(
+            marker=dict(line=dict(color=COLOR_BORDER, width=2)), # [NEW] White borders
+            hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>" # [NEW] Tooltip prompt
+        )
         st.plotly_chart(fig, use_container_width=True)
+        # The legend needs to be added manually as plotly express sunburst does not allow for category based legends
+        st.markdown(f"""
+        <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
+            <span style="display: flex; align-items: center;"><span style="width: 12px; height: 12px; background: #FFB3BA; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Subject</span>
+            <span style="display: flex; align-items: center;"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Relationship</span>
+            <span style="display: flex; align-items: center;"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Object Type</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+        # [INSERT GLOSSARY STEP HERE]
+        # It sits right under the chart, before we switch to the right column
+        visible_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
+        
+        with st.expander("📖 Relationship Glossary", expanded=False):
+            if not visible_edges:
+                st.caption("No relationships visible.")
+            else:
+                for edge in visible_edges:
+                    definition = get_rel_definition(edge)
+                    st.markdown(f"**{edge}**: {definition}")
 
     with c_right:
         st.subheader("Filter Data", divider = "gray")
@@ -2056,6 +2110,69 @@ def main():
             st.session_state.has_tried_login = False
             st.rerun()
 
+
+### RELATIONSHIP DEFINITONS ##
+RELATIONSHIP_DEFINITIONS= {
+    "ABILITY": "Refers to the functional capacity or practical feasibility of an entity to perform a specific task. It highlights the availability of space, time, or technical resources required to meet an objective. (Example: Confirming a building has 'plenty of room' for equipment or determining if a person 'can get there' for a scheduled event.)",
+    "ACHIEVEMENT": "Signifies the successful attainment of professional milestones, the receipt of prestigious honors, or significant breakthroughs in a field. (Example: Receiving a humanitarian award or reaching a major financial benchmark like €1 billion in assets under management.)",
+    "ACTION": "Captures the execution of logistical tasks, formal procedures, or specific physical movements intended to achieve a result. (Example: Signing a legal release form or arranging for a private aircraft to transport a colleague.)",
+    "AFFILIATION": "Denotes an entity's formal associations, institutional ties, or professional status. It identifies organizational memberships and social connections that establish a person's role or identity. (Example: Holding a professorship at a university or being a partner in a specific investment group.)",
+    "ANALYSIS": "Describes the systematic evaluation, interpretation, or comparative critique of information and concepts. It involves breaking down complex topics to provide judgment or insight. (Example: Contrasting the political strategies of different candidates or evaluating the impact of economic trends.)",
+    "ASSISTANCE": "Refers to the provision of resources, advocacy, or logistical aid to support another entity's goals or resolve their challenges. This includes financial backing, professional endorsements, and personal guidance. (Example: Providing 'wonderful support' to a cultural project like Poetry in America or using political influence to help an associate secure a government appointment.)",
+    "ATTENTION_DRAWING": "Involves directing focus toward a specific subject, variable, or event to highlight its importance or potential impact. It often appears in the context of investigations or financial warnings where certain details are singled out for closer scrutiny. (Example: Focusing on an investigation into Saudi royal finances or highlighting the negative return characteristics of a specific investment.)",
+    "AUDITION/CASTING": "Relates to the selection and assignment of individuals to specific roles in professional or creative productions. This includes career-defining casting decisions and strategic 'casting' used to facilitate the production of a work. (Example: Being cast in a first movie role or casting a specific person in a play to ensure it gets produced.)",
+    "CAUSALITY": "Describes a systemic relationship where one event or policy change triggers a shift in behavior or strategy across a group. It focuses on the 'ripple effect' of broad actions. (Example: How government budget cuts caused scientists to turn to private donors for funding.)",
+    "CAUSATION": "Refers to a direct link between an event and an immediate, often personal or punitive, consequence for an individual. It highlights a clear 'action-result' pair in a specific case. (Example: A person's 'unhappy situation' being the direct result of legal or disciplinary proceedings.)",
+    "CHALLENGE": "Represents the experience of significant difficulty, formal opposition, or public scrutiny. It often involves legal conflict, ethical reprimands, or being 'in the sights' of an investigator. (Example: Facing a federal judge's 'harsh rebuke' for failing to disclose information or navigating a 'professional misconduct' investigation.)",
+    "CHANGE": "Denotes a transition, modification, or reversal in a particular state or perception. This includes the replacement of information, shifts in public reputation, or the withdrawal of a candidate from a process. (Example: Successfully replacing a 'mug shot' on Wikipedia with a different photo or a official withdrawing from a high-profile job race.)",
+    "COMMUNICATION": "Encompasses the general exchange of information, inquiries, and the mention of entities within media or correspondence. It covers status updates, networking introductions, and instances where a subject is simply 'addressed' or 'named.' (Example: An email asking to 'call when you get a chance' or a news article that 'mentions' a person's name in relation to a professional topic.)",
+    "CONFLICT": "Describes a state of active disagreement, opposition, or a clash between different interests and viewpoints. It often manifests as public policy debates, legal resistance, or the rejection of specific plans. (Example: Opposing a city council's moratorium on development or being involved in a 'raging' debate between critics and supporters of a new law.)",
+    "CREATION": "Describes the process of originating, developing, or producing something new. This includes creative works, business ventures, conceptual frameworks, and physical structures. (Example: Producing a television series like 'Poetry in America,' launching a new publication like 'Cavalier' magazine, or establishing a foundation.)",
+    "DEVELOPMENT": "Refers to the iterative process of advancing, building, or refining projects, technologies, or products. It emphasizes growth and technical improvement rather than just the initial act of creation. (Example: Spending years 'translating a discovery' into a new medical drug, building a software database, or expanding a business's technology suite.)",
+    "DOCUMENT_INTERACTION": "Refers to the creation, handling, or referencing of formal records and published media. This includes writing reports, citing sources, filing legal paperwork, or being the subject of a news article. (Example: Filing a 'HIPAA release,' being 'featured' in a major newspaper, or citations in a formal report.)",
+    "EDUCATION": "Describes the formal process of teaching, academic training, and the pursuit of knowledge within institutional settings. It covers being a student or professor, taking specific courses, and the attainment (or abandonment) of degrees. (Example: Teaching a class to 'Japanese Engineers,' studying at a university like Northwestern, or obtaining a Master's degree from Harvard.)",
+    "EMOTION": "Captures the expression of internal feelings, subjective reactions, and interpersonal sentiments. It tracks the psychological or emotional state of an entity in response to events, people, or information. (Example: Feeling 'devastated' by an association, being 'excited' to start a project, or expressing 'obsession' with a particular subject.)",
+    "EVALUATION": "Relates to the act of assessing or assigning a qualitative or quantitative value to an entity. It focuses on the final 'rating' or 'ranking' given by an authority or expert. (Example: Reporting on how municipal bonds were 'rated' by Moody’s or determining that a country ranks 'at the bottom' for growth outlook.)",
+    "EVENT_PARTICIPATION": "Denotes an entity's presence at or active involvement in organized gatherings, social functions, or public performances. This covers attending professional conferences, participating in artistic rehearsals, or being present at social events. (Example: Performing in a community theater production, attending the World Economic Forum in Davos, or participating in a specific summit.)",
+    "FINANCIAL_TRANSACTION": "Relates to the movement, exchange, or management of monetary resources and assets. It covers a wide range of fiscal activities, including investments, the purchase of goods or services, charitable donations, and the handling of budgets. (Example: Recommending 'bank stocks' to buy, handling a '$25K donation' that bounced, or managing the 'budget and timing of funding' for a production.)",
+    "GAMBLING": "Refers to the act of placing stakes or taking financial risks based on the predicted outcome of a future event, such as an election or a market pivot. It frames speculation as a 'win/loss' scenario rather than traditional long-term investment. (Example: An absolute majority 'betting on HRC to win' the election or making market trades based on high-risk political 'scenarios.')",
+    "GIFT": "Identifies the voluntary transfer of assets, property, or services to another party without receiving payment in return. This includes charitable contributions, the gifting of high-value real estate, and offers of professional time. (Example: Giving a '$50 million townhouse' to a friend or offering several hours of professional expertise as a 'birthday present.')",
+    "GROWTH": "Describes the scaling up or progression of a project or entity into a more substantial stage of existence. It highlights increasing complexity, the addition of new members, or the move from a planning phase to full execution. (Example: Moving from 'preproduction' to 'production' or expanding a project to include new contributors.)",
+    "GUIDANCE": "Involves the sharing of information, news, or legal updates intended to provide advice or direction to a person or group. It focuses on helping others navigate changes in social or political landscapes. (Example: Forwarding a news article about new marriage benefits to help inform 'the gay community.')",
+    "INFLUENCE": "Refers to the exertive force an entity has on the thoughts, behaviors, or decision-making of another. This includes applying professional pressure, providing strategic coaching, or leveraging reputation to sway an outcome. (Example: Receiving 'pressure' from senior supporters to take a leave of absence or coaching an associate on how to refute specific public charges.)",
+    "KNOWLEDGE/OPINION": "Denotes an entity's subjective beliefs, stances, or conceptual framing of external reality. It involves making predictions, assigning qualitative traits to individuals, and asserting logical parallels between events. (Example: Predicting that a resignation will be a 'game changer' or asserting that a specific political figure is a 'heavyweight.')",
+    "LEGAL_ACTION": "Encompasses the formal processes and adversarial interactions associated with the justice system. This includes allegations of crimes, the filing of lawsuits, the execution of search warrants, and the representation of clients by attorneys. (Example: Being 'charged with a sex crime,' filing a civil suit for 'malicious prosecution,' or authorizing a 'search warrant.')",
+    "LEGAL_REPRESENTATION": "Refers to the formal professional relationship where an attorney or legal expert acts on behalf of a client. This involves providing defense, handling negotiations, and serving as a legal spokesperson. (Example: Ken Starr and Alan Dershowitz being the 'lawyers for' a client during proceedings or David Boies representing specific accusers.)",
+    "MEDIA_BROADCAST": "Refers to the act of airing, broadcasting, or featuring content in high-reach media outlets like television, radio, and major press organizations. It covers the filming of interviews, the dissemination of news shows, and the public release of documentaries or televised series. (Example: Airing a primary debate on Fox News, being the subject of a BBC 'Today' programme interview, or being 'featured' in a major television series.)",
+    "MEDICAL": "Relates to biological health, pharmaceuticals, and the study or treatment of physical conditions. This includes clinical trials, the pathology of diseases (such as parasites or viruses), and the regulatory approval of medical drugs. (Example: Conducting a 'clinical trial program' for cholesterol medication or analyzing the effect of 'parasite load' on biological development.)",
+    "MONITORING": "Refers to the persistent observation, surveillance, or systematic tracking of entities, behaviors, and communications. This includes following news cycles, tracking digital presence, or using intelligence to keep 'eyes on' a specific situation or individual. (Example: Watching 'phone lines,' tracking the progress of a 60-day clock on a deal, or monitoring the digital reputation of an individual.)",
+    "MOVEMENT": "Refers to the physical relocation of entities, the logistics of travel, and the specific geographic positioning of people or objects. It tracks departures, arrivals, visits, and the methods of transportation used to facilitate movement between locations. (Example: Flying from 'DC to Brussels,' being 'on the way to the airport,' or returning to a specific residence.)",
+    "NEED": "Describes a requirement, necessity, or strategic imperative that must be fulfilled. It identifies logistical needs, professional mandates, or procedural demands that an entity must address to achieve a goal. (Example: Stating that a person 'needs squashed' for political reasons, 'requiring' a signature on a legal document, or needing 'marching orders' to proceed.)",
+    "OTHER": "Serves as a miscellaneous category for interactions, relationships, and actions that do not fit into specific professional or legal labels. It covers incidental associations, general inclusion, broad impacts, and unclassified physical or conceptual links. (Example: Being 'included' in a general list, 'causing damage' to a property, or 'filming with' a colleague outside of a formal event.)",
+    "OWNERSHIP": "Refers to the possession, control, or legal title an entity has over assets, property, information, or objects. This includes real estate, financial asset classes, personal belongings, and the possession of sensitive media or data. (Example: Owning a 'palatial home,' having 'video recordings' in one's possession, or the state of 'where she keeps her' specific items.)",
+    "PARTICIPATION": "Describes an entity's engagement, role, or active involvement in a broad project, social movement, or ongoing situation. It captures the state of being 'part of' a process or having a stake in a complex unfolding event. (Example: Having a 'peripheral' role in a scandal, 'volunteering' for an international program, or becoming 'involved with' a large-scale real estate development.)",
+    "PHYSICAL_ACTION": "Refers to concrete physical events, natural processes, or forceful physical interactions that occur in the material world. It covers natural phenomena, physical violence, and the forced physical removal or protection of entities. (Example: An ice sheet 'melting' into the ocean, an associate who 'stabbed' a government official, or being 'booted off' a team.)",
+    "PLANNING": "Refers to the formulation of future intentions, strategies, schedules, and logistical arrangements. It covers high-level strategic maneuvering, professional scheduling, and the consideration of alternatives or contingency plans. (Example: Discussing a 'plot' to have a candidate lose an election, 'scheduling' a meeting for a specific time, or 'planning' a visit to a country.)",
+    "POLITICS": "Relates to the exercise of power, institutional governance, and the electoral process. It encompasses campaigning for office, the mechanics of voting and vetoes, party leadership dynamics, and geopolitical maneuvering between states. (Example: Being 'elected' to office, 'campaigning for' a candidate, or 'awaiting a return to power' in a specific country.)",
+    "PREPARATION": "Relates to the state of readiness or the immediate logistical coordination required to execute a plan. It captures the 'readying' phase where entities confirm platforms, time zones, or availability to ensure an upcoming interaction can proceed. (Example: Declaring one is 'ready when you are' for a series or checking for the best platform to use for a scheduled call.)",
+    "PROFESSIONAL_RELATIONSHIP": "Refers to formal connections and collaborative structures within a business or organizational context. It encompasses employment, management hierarchy, contractual partnerships, and professional hiring. (Example: Being 'managed by' a project lead, 'partnering with' another firm for a drug launch, or 'employing' a specific individual for research.)",
+    "PROTECTION": "Refers to actions taken to safeguard an entity, asset, or reputation from harm, interference, or unauthorized access. This includes digital security measures, physical safety in high-risk environments, and the prevention of negative outcomes or professional sabotage. (Example: Securing domains to prevent 'hijacks,' using incognito mode to protect search integrity, or mastering the 'danger' of a high-crime area.)",
+    "RELATED_TO": "Describes a broad, contextual, or logical association between entities. It encompasses social ties, topical relevance, and general connectivity that indicates one entity is relevant to another without a specific procedural or professional role. (Example: Having a 'friendship with' a person, being 'at the center of' a news cycle, or being 'tied up in' a specific investigation.)",
+    "REQUIREMENT": "Relates to an essential condition, prerequisite, or unavoidable obligation that must be met for an entity to function or a process to move forward. It covers functional dependencies, regulatory mandates, and critical needs like funding. (Example: Institutional needs that 'required' a reduction in spending or an individual who 'really needed' money for basic survival.)",
+    "RESEARCH": "Refers to the systematic examination, inquiry, or probing into individuals, entities, or events—often with the intent to uncover hidden, obscured, or previously unknown information. This includes formal investigations and the pursuit of evidence related to legal, financial, or reputational matters. The language used is active and purposeful, emphasizing discovery and the pursuit of facts, frequently in the context of legal or media-driven inquiries. (Example: Launched an investigation of offshore accounts.)",
+    "SELECTION": "Refers to the deliberate act of choosing, nominating, or identifying specific individuals, options, or assets from a broader set, often for a particular role, opportunity, or distinction. This includes the process of being selected for awards, appointments, or inclusion in exclusive lists, as well as the strategic choice of investments, candidates, or partners. The language used is decisive and outcome-oriented, emphasizing the act of picking, nominating, or being chosen for a defined purpose.",
+    "SHARED_CONTENT": "Refers to the act of distributing, forwarding, or making available information, media, or documents to one or more recipients. This includes sharing articles, links, images, legal documents, or other digital content—often to inform, persuade, or prompt discussion. The language and context suggest a focus on the dissemination of news, analysis, or evidence, frequently in real-time or as part of ongoing dialogue.",
+    "SOCIAL_INTERACTION": "Refers to the informal, interpersonal exchanges and relational dynamics between individuals, often characterized by casual conversation, humor, personal updates, and emotional support. This includes discussions about social plans, personal experiences, travel, professional gossip, and the sharing of opinions or advice. The language is typically conversational, sometimes playful or empathetic, and reflects the nuances of personal relationships, social bonding, and the navigation of both public and private spheres. (Example: 'Ask him about a sandwich,' 'I envy you,' 'Don’t let them get you to be emotional. Breathe! Think judicial demeanor.')",
+    "STATE_OF_BEING": "Refers to the condition, status, or existence of a person, entity, organization, or situation at a given time. This includes descriptions of legal, financial, or reputational states, as well as assessments of stability, vulnerability, or transformation. The language often reflects evaluations of risk, certainty, or inevitability, and may involve discussions of ongoing investigations, legal exposure, organizational health, or personal circumstances.",
+    "SUPPLY": "Refers to the provision, delivery, or facilitation of goods, services, information, or access—often in response to a specific request or need. This includes the arrangement of physical items (such as tickets, books, or technology), the sharing of specialized knowledge or resources, and the coordination of logistical support. The language used is transactional and solution-oriented, emphasizing the ability to source, deliver, or enable access to desired assets or opportunities.",
+    "SUPPORT": "Refers to the provision of assistance, encouragement, or backing—whether emotional, strategic, logistical, or professional—to an individual or group. This includes offering advice, sharing resources, advocating for someone’s position, or helping to navigate complex personal, political, or professional challenges. The language used is often empathetic, directive, or collaborative, reflecting a commitment to the recipient’s well-being, success, or resilience.",
+    "TIMING": "Refers to the scheduling, coordination, or sequencing of events, meetings, or actions—often with strategic, logistical, or symbolic significance. This includes the arrangement of appointments, the alignment of activities with external events (such as anniversaries, deadlines, or political transitions), and the consideration of timing as a tactical element in negotiations, public relations, or personal interactions. The language used highlights urgency, opportunity, or the importance of synchronization.",
+    "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities."
+}
+def get_rel_definition(rel_name):
+    """Helper to safely get a definition or a default prompt."""
+    return RELATIONSHIP_DEFINITIONS.get(rel_name, "Relationship connection between entities.")
+    
 if __name__ == "__main__":
     main()
     
