@@ -2174,7 +2174,7 @@ def main():
                   on_click=set_page, args=("Find Evidence via Chat or Cypher",))
 
         # Vertical Spacer to push Config to bottom
-        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
+        st.markdown("<br>"*15, unsafe_allow_html=True)
         
         st.divider()
         
