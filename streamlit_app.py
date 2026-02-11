@@ -433,40 +433,98 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_data=hover_cols
         )
 
-        # 4. Post-Process Colors (Semantic Layer Logic)
+        # 4. Post-Process: Colors (Layers) & Tooltips (Sentence Structure)
         try:
             sunburst_ids = fig.data[0]['ids']
             colors = []
+            hover_texts = []
+            
+            # --- Pre-calculate Aggregates for Tooltips ---
+            # We need to manually sum counts for parent rings to display accurate "Total" numbers in the sentence.
+            id_to_count = {}
+            for _, row in df.iterrows():
+                # Reconstruct Path IDs used by Plotly (Root, Root/Mid, Root/Mid/Leaf)
+                root_val = row[path[0]]
+                mid_val = row[path[1]]
+                leaf_val = row[path[2]]
+                
+                # Plotly IDs are joined by '/'
+                leaf_id = f"{root_val}/{mid_val}/{leaf_val}"
+                mid_id = f"{root_val}/{mid_val}"
+                root_id = f"{root_val}"
+                
+                c = row['count']
+                id_to_count[leaf_id] = id_to_count.get(leaf_id, 0) + c
+                id_to_count[mid_id] = id_to_count.get(mid_id, 0) + c
+                id_to_count[root_id] = id_to_count.get(root_id, 0) + c
             
             for id_str in sunburst_ids:
                 depth = id_str.count('/')
+                parts = id_str.split('/')
+                val = id_to_count.get(id_str, 0)
                 
+                # --- A. COLOR LOGIC ---
                 if selector_type == "Connections":
-                    # Structure: Relationship -> Subject -> Object
+                    # Structure: Relationship (Root) -> Subject (Mid) -> Object (Leaf)
                     if depth == 0:
-                        colors.append(COLOR_RELATIONSHIP) # Root is Relation
+                        colors.append(COLOR_RELATIONSHIP)
                     elif depth == 1:
-                        colors.append(COLOR_ROOT)         # Middle is Subject
+                        colors.append(COLOR_ROOT)
                     elif depth >= 2:
-                        colors.append(COLOR_TARGET)       # Outer is Object
+                        colors.append(COLOR_TARGET)
                     else:
                         colors.append('#333333')
                 else:
-                    # Structure: Subject -> Relationship -> Object
+                    # Structure: Subject (Root) -> Relationship (Mid) -> Object (Leaf)
                     if depth == 0:
-                        colors.append(COLOR_ROOT)         # Root is Subject
+                        colors.append(COLOR_ROOT)
                     elif depth == 1:
-                        colors.append(COLOR_RELATIONSHIP) # Middle is Relation
+                        colors.append(COLOR_RELATIONSHIP)
                     elif depth >= 2:
-                        colors.append(COLOR_TARGET)       # Outer is Object
+                        colors.append(COLOR_TARGET)
                     else:
                         colors.append('#333333')
 
-            # Apply the manually constructed color list
-            fig.update_traces(marker=dict(colors=colors))
+                # --- B. TOOLTIP LOGIC (Sentence Structure) ---
+                tooltip_text = ""
+                
+                if selector_type == "Connections":
+                    # [Edge, Source, Target]
+                    edge = parts[0]
+                    if depth == 0:
+                         tooltip_text = f"Connection Type: <b>{edge}</b><br>Total Occurrences: <b>{val}</b>"
+                    elif depth == 1:
+                        source = parts[1]
+                        tooltip_text = f"<b>{source}</b> has <b>{val}</b> {edge} relationships."
+                    elif depth == 2:
+                        source = parts[1]
+                        target = parts[2]
+                        tooltip_text = f"<b>{source}</b> has {edge} <b>{val}</b> {target}s."
+                
+                else:
+                    # [Name, Edge, Target]
+                    name = parts[0]
+                    if depth == 0:
+                        tooltip_text = f"Entity: <b>{name}</b><br>Total Connections: <b>{val}</b>"
+                    elif depth == 1:
+                        edge = parts[1]
+                        tooltip_text = f"<b>{name}</b> has <b>{val}</b> {edge} relationships."
+                    elif depth == 2:
+                        edge = parts[1]
+                        target = parts[2]
+                        tooltip_text = f"<b>{name}</b> has {edge} <b>{val}</b> {target}s."
+                
+                hover_texts.append(tooltip_text)
+
+            # Apply Colors AND Custom Tooltips
+            fig.update_traces(
+                marker=dict(colors=colors), 
+                hovertext=hover_texts, 
+                hovertemplate="%{hovertext}<br><br><i>For definition, see Glossary below.</i><extra></extra>"
+            )
             
         except Exception as e:
-            # Fallback if ID parsing fails
+            # Fallback if parsing fails
             pass
 
         # 5. Styling & UX
@@ -478,10 +536,8 @@ def render_explorer_workspace(selector_type, selected_items):
             font=dict(color="white")       
         )
         
-        fig.update_traces(
-            marker=dict(line=dict(color=COLOR_BORDER, width=2)),
-            hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>"
-        )
+        # Note: We moved hovertemplate update into the loop block above to use the custom text
+        fig.update_traces(marker=dict(line=dict(color=COLOR_BORDER, width=2)))
         
         st.plotly_chart(fig, use_container_width=True)
 
@@ -631,14 +687,6 @@ def render_explorer_workspace(selector_type, selected_items):
                     name_str = names[0]
                     
                 query_desc = f"Manual Explorer: {name_str}"
-                
-                # Dynamic Description for Cart
-                filters_desc = []
-                if selector_type == "Connections":
-                    # We can't easily access the selected variables from inside the if block above
-                    # without initializing them outside. But for brevity:
-                    # We'll rely on the user seeing what they filtered. 
-                    pass 
                 
                 payload = {
                     "query": query_desc,
