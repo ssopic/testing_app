@@ -700,9 +700,7 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
-        # If you see this again. You can remove it.
-        # current_count = len(st.session_state.app_state.get("evidence_locker", []))
-        # st.caption(f"Total items in Evidence Cart: {current_count}")
+
 
         
 # ==========================================
