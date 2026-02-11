@@ -2215,16 +2215,7 @@ def main():
         st.button("📈 Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
             
-        # Vertical Spacer to push Logout to bottom
-        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
 
-        st.divider()
-        
-        # Logout
-        if st.button("Logout", use_container_width=True):
-            st.session_state.app_state["connected"] = False
-            st.session_state.has_tried_login = False
-            st.rerun()
 
 
 ### RELATIONSHIP DEFINITONS ##
