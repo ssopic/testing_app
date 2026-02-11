@@ -360,10 +360,12 @@ def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
 def render_explorer_workspace(selector_type, selected_items):
     accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
-    # Colors for the Sentence Structure Visualization
-    COLOR_RELATIONSHIP = "#D3D3D3"  # Light Gray for all Verbs
-    COLOR_TARGET = "#00ADB5"        # Teal for all Objects
-    COLOR_BORDER = "#FFFFFF"        # White borders to cut the rings
+    # --- Hacker / Cyberpunk Color Palette ---
+    COLOR_ROOT = "#FF2E63"          # Neon Pink/Red for Subjects (The "Pop")
+    COLOR_RELATIONSHIP = "#4E545C"  # Gunmetal/Cool Gray for Connections (Modern Dark Mode)
+    COLOR_TARGET = "#00ADB5"        # Vivid Teal for Objects (Matches CSS Accent)
+    COLOR_BORDER = "#0E1117"        # Dark borders (matching bg) or White. Let's use White for high contrast pop.
+    COLOR_BORDER = "#FFFFFF"
 
     c_mid, c_right = st.columns([2, 1])
     
@@ -374,13 +376,12 @@ def render_explorer_workspace(selector_type, selected_items):
 
         names = [item['name'] for item in selected_items]
         
-        # --- Custom Legend ---
-        # Visual guide matching the chart layers and the filter icons
+        # --- Custom Legend (Updated for Single Colors) ---
         st.markdown(f"""
         <div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">
-            <span style="display: flex; align-items: center;" title="Layer 1: The Source Entity"><span style="width: 12px; height: 12px; background: linear-gradient(to right, #FFB3BA, #FFDFBA, #FFFFBA, #BAFFC9, #BAE1FF); border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Subject</span>
-            <span style="display: flex; align-items: center;" title="Layer 2: The Action/Connection"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px; border: 1px solid #666;"></span>Relationship (⬜)</span>
-            <span style="display: flex; align-items: center;" title="Layer 3: The Target Entity"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Object Type (🟦)</span>
+            <span style="display: flex; align-items: center;" title="Layer 1: The Source Entity"><span style="width: 12px; height: 12px; background: {COLOR_ROOT}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_ROOT};"></span>Subject</span>
+            <span style="display: flex; align-items: center;" title="Layer 2: The Action/Connection"><span style="width: 12px; height: 12px; background: {COLOR_RELATIONSHIP}; border-radius: 50%; display: inline-block; margin-right: 5px;"></span>Relationship (⬜)</span>
+            <span style="display: flex; align-items: center;" title="Layer 3: The Target Entity"><span style="width: 12px; height: 12px; background: {COLOR_TARGET}; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 5px {COLOR_TARGET};"></span>Object Type (🟦)</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -413,16 +414,7 @@ def render_explorer_workspace(selector_type, selected_items):
              st.error("Data columns missing for visualization.")
              return
 
-        # 3. Dynamic Color Mapping Logic (Root Layer Only)
-        # We pre-calculate root colors to map them by name later
-        root_color_map = {}
-        unique_roots = sorted(df[root_col].unique()) if root_col in df.columns else []
-        root_colors_palette = px.colors.qualitative.Pastel * (len(unique_roots) // len(px.colors.qualitative.Pastel) + 1)
-        for name, color in zip(unique_roots, root_colors_palette):
-            root_color_map[name] = color
-
-        # 4. Plot Generation
-        # We DO NOT set color here to avoid gradient. We will manually override colors next.
+        # 3. Plot Generation (No Color Map needed here, we override manually)
         fig = px.sunburst(
             df, 
             path=valid_path, 
@@ -430,29 +422,26 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_data=hover_cols
         )
 
-        # 5. Post-Process Colors (The "Layer" Logic)
-        # Iterate through the generated IDs to assign colors based on depth
+        # 4. Post-Process Colors (The "Layer" Logic - HACKER MODE)
         try:
             sunburst_ids = fig.data[0]['ids']
             colors = []
             
             for id_str in sunburst_ids:
-                # Plotly Express generates IDs like "Root/Child/Grandchild"
-                # We count slashes to determine depth
+                # Plotly Express IDs are "Root/Child/Grandchild"
                 depth = id_str.count('/')
                 
                 if depth == 0:
-                    # Root Layer -> Use distinct Pastel map
-                    # The ID at depth 0 is just the name of the root
-                    colors.append(root_color_map.get(id_str, '#888888'))
+                    # Root Layer -> Single Neon Pink
+                    colors.append(COLOR_ROOT)
                 elif depth == 1:
-                    # Middle Layer (Relationship) -> Uniform Gray
+                    # Middle Layer -> Cool Gray
                     colors.append(COLOR_RELATIONSHIP)
                 elif depth >= 2:
-                    # Leaf Layer (Target) -> Uniform Teal
+                    # Leaf Layer -> Vivid Teal
                     colors.append(COLOR_TARGET)
                 else:
-                    colors.append('#888888') # Fallback
+                    colors.append('#333333') # Fallback
 
             # Apply the manually constructed color list
             fig.update_traces(marker=dict(colors=colors))
@@ -461,6 +450,7 @@ def render_explorer_workspace(selector_type, selected_items):
             # Fallback if ID parsing fails
             pass
 
+        # 5. Styling & UX
         fig.update_layout(
             margin=dict(t=0, l=0, r=0, b=0), 
             height=500,
@@ -470,6 +460,7 @@ def render_explorer_workspace(selector_type, selected_items):
         )
         
         fig.update_traces(
+            # White borders make the colors pop against each other
             marker=dict(line=dict(color=COLOR_BORDER, width=2)),
             hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>"
         )
