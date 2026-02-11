@@ -2162,7 +2162,8 @@ def main():
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        st.markdown("Find Evidence and add to cart", text_alignment="center") 
+        #st.markdown("Find Evidence and add to cart", text_alignment="center")
+        st.markdown("<div style='text-align: center; font-size: 1.1em;'><b>Find Evidence and add to cart</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
         
