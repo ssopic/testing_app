@@ -2162,8 +2162,6 @@ def main():
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        #st.markdown("Find Evidence and add to cart", text_alignment="center")
-        st.markdown(accent_line, unsafe_allow_html=True)
         st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Find Evidence and add to cart</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
@@ -2203,7 +2201,7 @@ def main():
 
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
-        st.markdown("Select from Cart and Analyze", text_alignment="center")
+        st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Select from Cart and Analyze</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
         
