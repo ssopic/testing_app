@@ -433,40 +433,98 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_data=hover_cols
         )
 
-        # 4. Post-Process Colors (Semantic Layer Logic)
+        # 4. Post-Process: Colors (Layers) & Tooltips (Sentence Structure)
         try:
             sunburst_ids = fig.data[0]['ids']
             colors = []
+            hover_texts = []
+            
+            # --- Pre-calculate Aggregates for Tooltips ---
+            # We need to manually sum counts for parent rings to display accurate "Total" numbers in the sentence.
+            id_to_count = {}
+            for _, row in df.iterrows():
+                # Reconstruct Path IDs used by Plotly (Root, Root/Mid, Root/Mid/Leaf)
+                root_val = row[path[0]]
+                mid_val = row[path[1]]
+                leaf_val = row[path[2]]
+                
+                # Plotly IDs are joined by '/'
+                leaf_id = f"{root_val}/{mid_val}/{leaf_val}"
+                mid_id = f"{root_val}/{mid_val}"
+                root_id = f"{root_val}"
+                
+                c = row['count']
+                id_to_count[leaf_id] = id_to_count.get(leaf_id, 0) + c
+                id_to_count[mid_id] = id_to_count.get(mid_id, 0) + c
+                id_to_count[root_id] = id_to_count.get(root_id, 0) + c
             
             for id_str in sunburst_ids:
                 depth = id_str.count('/')
+                parts = id_str.split('/')
+                val = id_to_count.get(id_str, 0)
                 
+                # --- A. COLOR LOGIC ---
                 if selector_type == "Connections":
-                    # Structure: Relationship -> Subject -> Object
+                    # Structure: Relationship (Root) -> Subject (Mid) -> Object (Leaf)
                     if depth == 0:
-                        colors.append(COLOR_RELATIONSHIP) # Root is Relation
+                        colors.append(COLOR_RELATIONSHIP)
                     elif depth == 1:
-                        colors.append(COLOR_ROOT)         # Middle is Subject
+                        colors.append(COLOR_ROOT)
                     elif depth >= 2:
-                        colors.append(COLOR_TARGET)       # Outer is Object
+                        colors.append(COLOR_TARGET)
                     else:
                         colors.append('#333333')
                 else:
-                    # Structure: Subject -> Relationship -> Object
+                    # Structure: Subject (Root) -> Relationship (Mid) -> Object (Leaf)
                     if depth == 0:
-                        colors.append(COLOR_ROOT)         # Root is Subject
+                        colors.append(COLOR_ROOT)
                     elif depth == 1:
-                        colors.append(COLOR_RELATIONSHIP) # Middle is Relation
+                        colors.append(COLOR_RELATIONSHIP)
                     elif depth >= 2:
-                        colors.append(COLOR_TARGET)       # Outer is Object
+                        colors.append(COLOR_TARGET)
                     else:
                         colors.append('#333333')
 
-            # Apply the manually constructed color list
-            fig.update_traces(marker=dict(colors=colors))
+                # --- B. TOOLTIP LOGIC (Sentence Structure) ---
+                tooltip_text = ""
+                
+                if selector_type == "Connections":
+                    # [Edge, Source, Target]
+                    edge = parts[0]
+                    if depth == 0:
+                         tooltip_text = f"Connection Type: <b>{edge}</b><br>Total Occurrences: <b>{val}</b>"
+                    elif depth == 1:
+                        source = parts[1]
+                        tooltip_text = f"<b>{source}</b> has <b>{val}</b> {edge} relationships."
+                    elif depth == 2:
+                        source = parts[1]
+                        target = parts[2]
+                        tooltip_text = f"<b>{source}</b> has {edge} <b>{val}</b> {target}s."
+                
+                else:
+                    # [Name, Edge, Target]
+                    name = parts[0]
+                    if depth == 0:
+                        tooltip_text = f"Entity: <b>{name}</b><br>Total Connections: <b>{val}</b>"
+                    elif depth == 1:
+                        edge = parts[1]
+                        tooltip_text = f"<b>{name}</b> has <b>{val}</b> {edge} relationships."
+                    elif depth == 2:
+                        edge = parts[1]
+                        target = parts[2]
+                        tooltip_text = f"<b>{name}</b> has {edge} <b>{val}</b> {target}s."
+                
+                hover_texts.append(tooltip_text)
+
+            # Apply Colors AND Custom Tooltips
+            fig.update_traces(
+                marker=dict(colors=colors), 
+                hovertext=hover_texts, 
+                hovertemplate="%{hovertext}<br><br><i>For definition, see Glossary below.</i><extra></extra>"
+            )
             
         except Exception as e:
-            # Fallback if ID parsing fails
+            # Fallback if parsing fails
             pass
 
         # 5. Styling & UX
@@ -478,10 +536,8 @@ def render_explorer_workspace(selector_type, selected_items):
             font=dict(color="white")       
         )
         
-        fig.update_traces(
-            marker=dict(line=dict(color=COLOR_BORDER, width=2)),
-            hovertemplate="<b>%{label}</b><br>Items: %{value}<br><br><i>For definition, see Glossary below.</i>"
-        )
+        # Note: We moved hovertemplate update into the loop block above to use the custom text
+        fig.update_traces(marker=dict(line=dict(color=COLOR_BORDER, width=2)))
         
         st.plotly_chart(fig, use_container_width=True)
 
@@ -612,8 +668,9 @@ def render_explorer_workspace(selector_type, selected_items):
         unique_ids = list(set(all_ids))
         string = "Documents Found: " + str(len(unique_ids)) 
         st.text(string)
-        with st.expander("Preview ID List", expanded=False):
-            st.write(unique_ids)
+        # Uncomment to allow the preview of ID lists in the app. Useful for debugging
+        # with st.expander("Preview ID List", expanded=False):
+        #     st.write(unique_ids)
 
         st.markdown(accent_line, unsafe_allow_html=True)
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
@@ -632,14 +689,6 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 query_desc = f"Manual Explorer: {name_str}"
                 
-                # Dynamic Description for Cart
-                filters_desc = []
-                if selector_type == "Connections":
-                    # We can't easily access the selected variables from inside the if block above
-                    # without initializing them outside. But for brevity:
-                    # We'll rely on the user seeing what they filtered. 
-                    pass 
-                
                 payload = {
                     "query": query_desc,
                     "answer": f"Visual discovery found {len(unique_ids)} related documents.",
@@ -652,8 +701,6 @@ def render_explorer_workspace(selector_type, selected_items):
                 st.session_state.app_state["evidence_locker"].append(payload)
                 st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
 
-        current_count = len(st.session_state.app_state.get("evidence_locker", []))
-        st.caption(f"Total items in Evidence Cart: {current_count}")
 
         
 # ==========================================
@@ -829,9 +876,17 @@ def screen_databook():
         )
         
 # ==========================================
-# 0. NON UPDATED PARTS
+# 0. NON ORGANIZED PARTS
 # ==========================================
 
+#WELCOME BUTTON
+@st.dialog("Welcome")
+def show_welcome_popup():
+    # 2. Add welcome pop up
+    st.write("Welcome")
+    if st.button("Get Started"):
+        st.session_state.welcome_shown = True
+        st.rerun()
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
 
@@ -1611,42 +1666,80 @@ def screen_extraction():
 @st.fragment
 def screen_locker():
     st.title("Evidence Cart")
-    locker = st.session_state.app_state["evidence_locker"]
+    locker = st.session_state.app_state.get("evidence_locker", [])
     
     if not locker:
         st.info("Locker is empty.")
         return
 
-    # 1. Initialize local selection set
+    # 1. Initialize current selection session state if needed
     current_selection = set()
-    
-    # 2. Retrieve previously selected IDs to restore checkbox state
     global_selected = st.session_state.app_state.get("selected_ids", set())
 
     for i, entry in enumerate(locker):
         with st.container(border=True):
-            c1, c2 = st.columns([0.1, 0.9])
+            c1, c2 = st.columns([0.15, 0.85])
+            
+            # Preparation for Checkbox Persistence
+            entry_ids_str = {str(pid) for pid in entry["ids"]}
+            is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
             with c1:
-                # 3. Logic: If the entry's IDs are already in the global set, check the box.
-                # We convert entry IDs to a set of strings to compare.
-                entry_ids_str = {str(pid) for pid in entry["ids"]}
-                
-                # Check if this batch is already selected (subset of global selection)
-                is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
-
-                # 4. Render Checkbox with `value=` set to restored state
+                # The user-facing selection functionality
                 is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
-                
-                if is_sel: 
-                    # If checked (either by user or restored state), add to current set
-                    for pid in entry["ids"]: 
+                if is_sel:
+                    # Keep propagation alive by adding all IDs to the selection set
+                    for pid in entry["ids"]:
                         current_selection.add(str(pid))
+            
             with c2:
-                st.write(f"**Query:** {entry['query']}")
-                st.caption(f"Found IDs: {', '.join(entry['ids'])}")
+                st.markdown(f"**Query:** {entry['query']}")
+                # COSMETIC CHANGE: Show count instead of the full ID list
+                st.markdown(f"**Evidence Count:** `{len(entry['ids'])} documents`")
+                st.caption(f"Summary: {entry.get('answer', 'No description available.')}")
 
-    # 5. Commit to Global State
+    # Commit selection back to the global state for the analyst
     st.session_state.app_state["selected_ids"] = current_selection
+# testing the new variant. if you see this remove it.
+# @st.fragment
+# def screen_locker():
+#     st.title("Evidence Cart")
+#     locker = st.session_state.app_state["evidence_locker"]
+    
+#     if not locker:
+#         st.info("Locker is empty.")
+#         return
+
+#     # 1. Initialize local selection set
+#     current_selection = set()
+    
+#     # 2. Retrieve previously selected IDs to restore checkbox state
+#     global_selected = st.session_state.app_state.get("selected_ids", set())
+
+#     for i, entry in enumerate(locker):
+#         with st.container(border=True):
+#             c1, c2 = st.columns([0.1, 0.9])
+#             with c1:
+#                 # 3. Logic: If the entry's IDs are already in the global set, check the box.
+#                 # We convert entry IDs to a set of strings to compare.
+#                 entry_ids_str = {str(pid) for pid in entry["ids"]}
+                
+#                 # Check if this batch is already selected (subset of global selection)
+#                 is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
+#                 # 4. Render Checkbox with `value=` set to restored state
+#                 is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
+                
+#                 if is_sel: 
+#                     # If checked (either by user or restored state), add to current set
+#                     for pid in entry["ids"]: 
+#                         current_selection.add(str(pid))
+#             with c2:
+#                 st.write(f"**Query:** {entry['query']}")
+#                 st.caption(f"Found IDs: {', '.join(entry['ids'])}")
+
+#     # 5. Commit to Global State
+#     st.session_state.app_state["selected_ids"] = current_selection
 
 @st.fragment
 def screen_analysis():
@@ -2100,7 +2193,7 @@ def main():
 
     # Initialize Page State if not present
     if "current_page" not in st.session_state:
-        st.session_state.current_page = "Find Evidence Manually"
+        st.session_state.current_page = "Find Evidence via Chat or Cypher"
 
     # 2. Connection Gatekeeper
     if not st.session_state.app_state["connected"]:
@@ -2108,6 +2201,10 @@ def main():
         if st.button("⚙️ Settings"):
             show_settings_dialog()
         return
+        
+    # Welcome button
+    if "welcome_shown" not in st.session_state:
+        show_welcome_popup()
 
     # 3. Cockpit Layout (3 Columns)
     # Ratios: [1.2, 8, 1.2]
@@ -2115,7 +2212,7 @@ def main():
 
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
-        st.markdown("Find Evidence and add to cart", text_alignment="center") 
+        st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Find Evidence and add to cart</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
         
@@ -2127,7 +2224,7 @@ def main():
                   on_click=set_page, args=("Find Evidence via Chat or Cypher",))
 
         # Vertical Spacer to push Config to bottom
-        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
+        st.markdown("<br>"*10, unsafe_allow_html=True)
         
         st.divider()
         
@@ -2154,7 +2251,7 @@ def main():
 
     # --- RIGHT COLUMN (Output & Tools) ---
     with c_right:
-        st.markdown("Select from Cart and Analyze", text_alignment="center")
+        st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Select from Cart and Analyze</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
         
@@ -2168,16 +2265,7 @@ def main():
         st.button("📈 Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
             
-        # Vertical Spacer to push Logout to bottom
-        st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
 
-        st.divider()
-        
-        # Logout
-        if st.button("Logout", use_container_width=True):
-            st.session_state.app_state["connected"] = False
-            st.session_state.has_tried_login = False
-            st.rerun()
 
 
 ### RELATIONSHIP DEFINITONS ##
