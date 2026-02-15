@@ -1700,117 +1700,418 @@ def screen_locker():
 
     # Commit selection back to the global state for the analyst
     st.session_state.app_state["selected_ids"] = current_selection
-# testing the new variant. if you see this remove it.
-# @st.fragment
-# def screen_locker():
-#     st.title("Evidence Cart")
-#     locker = st.session_state.app_state["evidence_locker"]
-    
-#     if not locker:
-#         st.info("Locker is empty.")
-#         return
 
-#     # 1. Initialize local selection set
-#     current_selection = set()
-    
-#     # 2. Retrieve previously selected IDs to restore checkbox state
-#     global_selected = st.session_state.app_state.get("selected_ids", set())
 
-#     for i, entry in enumerate(locker):
-#         with st.container(border=True):
-#             c1, c2 = st.columns([0.1, 0.9])
-#             with c1:
-#                 # 3. Logic: If the entry's IDs are already in the global set, check the box.
-#                 # We convert entry IDs to a set of strings to compare.
-#                 entry_ids_str = {str(pid) for pid in entry["ids"]}
-                
-#                 # Check if this batch is already selected (subset of global selection)
-#                 is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
-
-#                 # 4. Render Checkbox with `value=` set to restored state
-#                 is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
-                
-#                 if is_sel: 
-#                     # If checked (either by user or restored state), add to current set
-#                     for pid in entry["ids"]: 
-#                         current_selection.add(str(pid))
-#             with c2:
-#                 st.write(f"**Query:** {entry['query']}")
-#                 st.caption(f"Found IDs: {', '.join(entry['ids'])}")
-
-#     # 5. Commit to Global State
-#     st.session_state.app_state["selected_ids"] = current_selection
-
+#############################################################################
+#### The analysis screen
+#### This screen takes the dataframe containing our evidence and analyzes it 
+#############################################################################
 @st.fragment
 def screen_analysis():
-    st.title("🔬 Analysis Pane")
+    st.title("🔬 Analysis Pane (Agentic)")
     
-    # Retrieve selected IDs safely
+    # 1. Retrieve State
     ids = list(st.session_state.app_state.get("selected_ids", []))
-    
     if not ids:
         st.warning("No documents selected.")
         return
     
-    # Get the main dataframe (Already cleaned and has Bates_Identity)
+    # Ensure data is loaded
+    if 'github_data' not in st.session_state:
+        # Assuming load_github_data is available in the main scope or imported
+        # For this file context, we assume it's loaded. 
+        # In real integration, import load_github_data from current.py
+        pass 
+        
     df = st.session_state.github_data
-
-    # Filter for selected IDs using the cleaned dataframe
     matched = df[df['PK'].isin(ids)]
-    
     st.subheader(f"Analyzing {len(matched)} Documents")
-    
-    if not matched.empty:
-        # --- 1. Prepare LLM Context (Using Bates Identity) ---
-        llm_context = ""
-        for _, row in matched.iterrows():
-            # Use the synthetic Bates Identity
-            bates_id = row.get('Bates_Identity', 'Unknown Doc')
-            body_text = row.get('Body') or 'No Content'
-            # Update Context to use Bates ID instead of PK
-            llm_context += f"Document: {bates_id}\nContent: {body_text}\n---\n"
 
-        # --- 2. Document Reader Interface ---
-        # Selectbox allows user to view specific doc details without filtering LLM context
-        doc_options = matched['Bates_Identity'].tolist()
-        
-        # Dropdown to select document
-        selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
-        
-        # Find the row corresponding to selection
-        if selected_bates:
-            # Safe retrieval of the specific row
-            view_row = matched[matched['Bates_Identity'] == selected_bates].iloc[0]
-            
-            # Metadata Display
-            with st.container(border=True):
-                c1, c2, c3 = st.columns([1, 1, 2])
-                c1.metric("Bates Begin", view_row['Bates Begin'])
-                c2.metric("Bates End", view_row['Bates End'])
-                # Text Link display (Read-only or Link if valid URL)
-                link_val = view_row['Text Link']
-                if link_val and link_val.startswith('http'):
-                    c3.link_button("Open Text Link", link_val)
-                else:
-                    c3.text_input("Text Link", value=link_val if link_val else "N/A", disabled=True)
-            
-            # Content Display
-            st.caption("Document Body")
-            st.text_area("Body content", view_row.get('Body', ''), height=300, label_visibility="collapsed", disabled=True)
-            
-        # --- 3. Chat Interface ---
-        # Optional: Show what the LLM sees
-        with st.expander("View LLM Context (Bates Format)"):
-            st.text(llm_context)
-            
-        q = st.chat_input("Ask about this evidence:")
-        if q:
-            # Assuming get_cached_llm is available
-            llm = get_cached_llm(st.session_state.app_state["mistral_key"])
-            resp = llm.invoke(f"Context:\n{llm_context}\n\nQuestion: {q}")
-            st.info(resp.content)
+    # 2. Document Reader (Preserved from original)
+    doc_options = matched['Bates_Identity'].tolist()
+    selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
     
+    if selected_bates:
+        view_row = matched[matched['Bates_Identity'] == selected_bates].iloc[0]
+        with st.container(border=True):
+            st.caption(f"Viewing: {view_row['Bates_Identity']}")
+            st.text_area("Body", view_row.get('Body', ''), height=200, disabled=True)
+
+    # 3. Agentic Chat Interface
+    st.divider()
+    st.write("### Agentic Analysis")
+    
+    q = st.chat_input("Ask about this evidence set:")
+    
+    if q:
+        api_key = st.session_state.app_state.get("mistral_key", "")
+        if not api_key:
+            st.error("Mistral API Key is missing.")
+            return
+
+        # Initialize Engine
+        # We instantiate here. In production, we might cache this object, 
+        # but for now, it's lightweight.
+        engine = MapReduceEngine(api_key=api_key)
+        
+        # Prepare Docs for the Engine
+        docs_payload = []
+        for _, row in matched.iterrows():
+            docs_payload.append({
+                "Body": row.get('Body', ''),
+                "Bates_Identity": row.get('Bates_Identity', 'Unknown')
+            })
+
+        # --- THE PIPELINE UI ---
+        
+        # We use st.status to give the user that "constant change" feedback
+        with st.status("Initializing Agent Swarm...", expanded=True) as status:
+            
+            # Step A: The Gatekeeper
+            strategy = engine.estimate_strategy([d['Body'] for d in docs_payload])
+            st.write(f"🧠 Gatekeeper Decision: **{strategy}** Mode")
+            
+            if strategy == "DIRECT":
+                # Fallback to simple logic for small context
+                status.update(label="Running Direct Analysis...", state="running")
+                # Simple concatenation
+                context = "\n".join([f"Doc: {d['Bates_Identity']}\n{d['Body']}" for d in docs_payload])
+                
+                # Use the 'reduce' llm for a direct answer
+                from langchain_core.prompts import ChatPromptTemplate
+                prompt = ChatPromptTemplate.from_template("Context: {context}\n\nQuestion: {q}")
+                chain = prompt | engine.llm_reduce
+                response = chain.invoke({"context": context, "q": q})
+                final_answer = response.content
+                status.update(label="Analysis Complete", state="complete", expanded=False)
+
+            else:
+                # MAP-REDUCE STRATEGY
+                
+                # Step B: The Architect
+                status.write("🏗️ Architect is analyzing your question...")
+                extraction_goal = engine.architect_query(q)
+                status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
+                
+                # Step C: Parallel Map
+                status.update(label="Agents are scanning documents...", state="running")
+                status.write(f"🚀 Spawning {len(docs_payload)} extraction agents...")
+                
+                # This function updates the status label as it runs
+                facts = engine.run_parallel_map(docs_payload, extraction_goal, status_container=status)
+                
+                relevant_count = sum(1 for f in facts if f.has_relevant_info)
+                status.write(f"✅ Extraction complete. Found relevant info in {relevant_count} documents.")
+                
+                # Step D: Reduce
+                status.update(label="Synthesizing Final Answer...", state="running")
+                final_answer = engine.reduce_facts(facts, q)
+                status.update(label="Analysis Complete", state="complete", expanded=False)
+
+        # 4. Display Result
+        if final_answer:
+            st.info(final_answer)
+            
+            # Optional: Show citations/sources if in Map-Reduce mode
+            if strategy == "MAP_REDUCE" and 'facts' in locals():
+                with st.expander("View Source Citations"):
+                    for f in facts:
+                        if f.has_relevant_info:
+                            st.markdown(f"**{f.doc_id}**")
+                            st.caption(f"Reasoning: {f.extracted_summary}")
+                            for quote in f.relevant_quotes:
+                                st.text(f"\"{quote}\"")
+                            st.divider()
+
+
+#############################################################################
+#The modification that allows for extracting information from multiple documents without breaking the context window 
+#############################################################################
+import concurrent.futures
+from typing import List, Optional
+from pydantic import BaseModel, Field
+from langchain_mistralai import ChatMistralAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+
+# --- CONFIGURATION ---
+TOKEN_THRESHOLD_CHARS = 40000 
+MAX_WORKERS = 4 
+# Batch Size Strategy:
+# 15,000 chars is roughly 3,500 - 4,000 tokens. 
+# Mistral Small has a 32k context, but keeping it smaller ensures higher attention/recall per doc.
+BATCH_SIZE_CHARS = 15000 
+
+# --- PYDANTIC MODELS ---
+
+class ExtractionGoal(BaseModel):
+    """Generated by the Architect to guide the Map Agents."""
+    goal_description: str = Field(description="Specific instructions on what information to extract.")
+    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
+
+class DocumentFact(BaseModel):
+    """The output of a Map Agent reading a single document."""
+    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
+    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
+    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
+    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
+
+class BatchExtractionResult(BaseModel):
+    """Wrapper to handle multiple document extractions in one pass."""
+    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
+
+# --- THE ENGINE CLASS ---
+
+import concurrent.futures
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from langchain_mistralai import ChatMistralAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+
+# --- CONFIGURATION ---
+TOKEN_THRESHOLD_CHARS = 40000 
+MAX_WORKERS = 4 
+# Batch Size Strategy:
+# 15,000 chars is roughly 3,500 - 4,000 tokens. 
+# Mistral Small has a 32k context, but keeping it smaller ensures higher attention/recall per doc.
+BATCH_SIZE_CHARS = 15000 
+
+# --- PYDANTIC MODELS ---
+
+class ExtractionGoal(BaseModel):
+    """Generated by the Architect to guide the Map Agents."""
+    goal_description: str = Field(description="Specific instructions on what information to extract.")
+    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
+
+class DocumentFact(BaseModel):
+    """The output of a Map Agent reading a single document."""
+    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
+    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
+    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
+    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
+
+class BatchExtractionResult(BaseModel):
+    """Wrapper to handle multiple document extractions in one pass."""
+    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
+
+# --- THE ENGINE CLASS ---
+
+class MapReduceEngine:
+    # --- PROMPT TEMPLATES (Exposed for tuning) ---
+    ARCHITECT_PROMPT_TEMPLATE = """You are an Expert Legal Analyst. 
+    User Query: {query}
+    
+    Create a specific 'Extraction Goal' for junior analysts.
+    If the user asks about specific details (dates, names, colors), explicitly include them in keywords.
+    
+    Your response must be a single valid JSON object strictly matching the schema.
+    
+    {format_instructions}
+    """
+
+    MAP_PROMPT_TEMPLATE = """You are a Fact Extraction Agent analyzing a batch of documents.
+    
+    GOAL: {goal_description}
+    KEYWORDS: {keywords}
+    
+    Analyze the following documents. For EACH document, create an extraction result.
+    Always use the exact DOCUMENT ID provided in the header.
+    
+    BATCH CONTENT:
+    {content}
+    
+    Output strictly valid JSON.
+    
+    {format_instructions}
+    """
+
+    REDUCE_PROMPT_TEMPLATE = """You are a Lead Investigator.
+    Answer the user's question using ONLY the provided facts.
+    Cite your sources using the [Source ID] format.
+    
+    User Question: {query}
+    
+    Extracted Facts:
+    {context}
+    """
+
+    def __init__(self, api_key: str, model_small: str = "mistral-small", model_large: str = "mistral-medium"):
+        self.api_key = api_key
+        self.llm_map = ChatMistralAI(model=model_small, api_key=api_key, temperature=0.0)
+        self.llm_reduce = ChatMistralAI(model=model_large, api_key=api_key, temperature=0.0)
+        # Transparency: Store logs of what happened
+        self.execution_logs: List[Dict[str, Any]] = []
+
+    def get_schemas(self) -> Dict[str, Any]:
+        """Returns the JSON schemas for the Pydantic models used."""
+        return {
+            "ExtractionGoal": ExtractionGoal.model_json_schema(),
+            "DocumentFact": DocumentFact.model_json_schema(),
+            "BatchExtractionResult": BatchExtractionResult.model_json_schema()
+        }
+
+    def _log_step(self, step_name: str, prompt_content: str, result_summary: str = ""):
+        """Internal helper to log execution details."""
+        self.execution_logs.append({
+            "step": step_name,
+            "prompt": prompt_content,
+            "result": result_summary
+        })
+
+    def estimate_strategy(self, docs_content: List[str]) -> str:
+        """The Gatekeeper."""
+        total_chars = sum(len(d) for d in docs_content if d)
+        if total_chars < TOKEN_THRESHOLD_CHARS:
+            return "DIRECT"
+        return "MAP_REDUCE"
+
+    def architect_query(self, user_query: str) -> ExtractionGoal:
+        """The Architect."""
+        parser = PydanticOutputParser(pydantic_object=ExtractionGoal)
+        prompt = ChatPromptTemplate.from_template(self.ARCHITECT_PROMPT_TEMPLATE)
+        
+        # LOGGING: Capture the formatted prompt before sending
+        format_instructions = parser.get_format_instructions()
+        formatted_prompt = prompt.format(query=user_query, format_instructions=format_instructions)
+        self._log_step("Architect", formatted_prompt)
+
+        chain = prompt | self.llm_reduce | parser
+        try:
+            return chain.invoke({"query": user_query, "format_instructions": format_instructions})
+        except Exception as e:
+            print(f"Architect JSON parsing failed: {e}. Using fallback.")
+            return ExtractionGoal(
+                goal_description=f"Extract all information relevant to the user query: {user_query}",
+                keywords=[]
+            )
+
+    def _create_batches(self, docs: List[dict]) -> List[List[dict]]:
+        """Smart Batching: Bins documents into chunks based on character count."""
+        batches = []
+        current_batch = []
+        current_chars = 0
+        
+        for doc in docs:
+            doc_len = len(doc.get('Body', ''))
+            # If a single doc is huge, it gets its own batch
+            if current_batch and (current_chars + doc_len > BATCH_SIZE_CHARS):
+                batches.append(current_batch)
+                current_batch = [doc]
+                current_chars = doc_len
+            else:
+                current_batch.append(doc)
+                current_chars += doc_len
+        
+        if current_batch:
+            batches.append(current_batch)
+            
+        return batches
+
+    def map_document_batch(self, batch_docs: List[dict], goal: ExtractionGoal) -> List[DocumentFact]:
+        """The Map Worker: Processes a BATCH of documents at once."""
+        parser = PydanticOutputParser(pydantic_object=BatchExtractionResult)
+        
+        # Construct the "Mega-Prompt" context for this batch
+        batch_context = ""
+        doc_ids_in_batch = []
+        for d in batch_docs:
+            d_id = d.get('Bates_Identity', 'Unknown')
+            d_body = d.get('Body', '')[:20000] # Safety truncate per doc
+            doc_ids_in_batch.append(d_id)
+            batch_context += f"--- DOCUMENT ID: {d_id} ---\n{d_body}\n\n"
+
+        prompt = ChatPromptTemplate.from_template(self.MAP_PROMPT_TEMPLATE)
+        
+        # LOGGING: Capture the formatted prompt
+        # Note: In parallel execution, this log might be called multiple times.
+        format_instructions = parser.get_format_instructions()
+        formatted_prompt = prompt.format(
+            goal_description=goal.goal_description,
+            keywords=", ".join(goal.keywords),
+            content=batch_context,
+            format_instructions=format_instructions
+        )
+        # We only log a sample (the first 500 chars of content) to avoid memory bloat in logs
+        log_view = formatted_prompt.replace(batch_context, f"[BATCH CONTENT HIDDEN ({len(batch_context)} chars)]")
+        self._log_step("Map Agent (Batch)", log_view)
+
+        chain = prompt | self.llm_map | parser
+        try:
+            # We assume Mistral Small can handle the JSON schema complexity
+            result = chain.invoke({
+                "goal_description": goal.goal_description,
+                "keywords": ", ".join(goal.keywords),
+                "content": batch_context,
+                "format_instructions": format_instructions
+            })
+            
+            valid_results = []
+            for item in result.results:
+                valid_results.append(item)
+                
+            return valid_results
+            
+        except Exception as e:
+            return [DocumentFact(doc_id=d, has_relevant_info=False, relevant_quotes=[], extracted_summary=f"Error: {str(e)}") for d in doc_ids_in_batch]
+
+    def reduce_facts(self, facts: List[DocumentFact], user_query: str) -> str:
+        """The Reduce Worker: Synthesizes final answer."""
+        relevant_facts = [f for f in facts if f.has_relevant_info]
+        
+        if not relevant_facts:
+            return "I analyzed the documents but found no relevant specific information matching your criteria."
+            
+        context_str = ""
+        for f in relevant_facts:
+            context_str += f"Source ({f.doc_id}): {f.extracted_summary}\nQuotes: {f.relevant_quotes}\n---\n"
+            
+        prompt = ChatPromptTemplate.from_template(self.REDUCE_PROMPT_TEMPLATE)
+        
+        # LOGGING
+        formatted_prompt = prompt.format(query=user_query, context=context_str)
+        self._log_step("Reduce/Synthesis", formatted_prompt)
+
+        chain = prompt | self.llm_reduce
+        return chain.invoke({"query": user_query, "context": context_str}).content
+
+    def run_parallel_map(self, docs: List[dict], goal: ExtractionGoal, status_container=None) -> List[DocumentFact]:
+        """Orchestrates parallel processing of BATCHES."""
+        
+        self.execution_logs = [] # Clear previous logs on new run
+        
+        # 1. Create Batches
+        batches = self._create_batches(docs)
+        if status_container:
+            status_container.write(f"📦 Optimized {len(docs)} documents into {len(batches)} processing batches.")
+        
+        all_results = []
+        
+        # 2. Process Batches in Parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_batch = {
+                executor.submit(self.map_document_batch, batch, goal): batch 
+                for batch in batches
+            }
+            
+            completed_batches = 0
+            for future in concurrent.futures.as_completed(future_to_batch):
+                completed_batches += 1
+                try:
+                    batch_results = future.result()
+                    all_results.extend(batch_results)
+                    if status_container:
+                        status_container.update(label=f"Processed batch {completed_batches}/{len(batches)}...", state="running")
+                except Exception as e:
+                    print(f"Batch failed: {e}")
+                    
+        return all_results
+
+
+
+##########################
 # --- MAIN NAVIGATION ---
+#########################
 def inject_custom_css():
     """
     Hides the standard Streamlit sidebar and applies styling for the cockpit layout.
