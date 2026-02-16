@@ -2247,368 +2247,346 @@ class MapReduceEngine:
 ##########################
 # --- MAIN NAVIGATION ---
 #########################
+THEME = {
+    "bg_base": "#09090b",       # Zinc-950 (was #0E1117)
+    "bg_panel": "#18181b",      # Zinc-900 (was #1F2129)
+    "bg_input": "#27272a",      # Zinc-800
+    "border_subtle": "#3f3f46", # Zinc-700 (was #41444C)
+    "text_primary": "#f4f4f5",  # Zinc-100 (was #FFFFFF)
+    "text_secondary": "#a1a1aa",# Zinc-400
+    "accent": "#d97706",        # Amber-600 (was #00ADB5 Cyan) - The "Fix"
+    "accent_hover": "#b45309",  # Amber-700
+    "shadow_subtle": "0 1px 2px rgba(0,0,0,0.5)",
+}
+
 def inject_custom_css():
     """
     Hides the standard Streamlit sidebar and applies styling for the cockpit layout.
+    Refactored to "Industrial Graph" aesthetics to fix AI Tells while keeping all selectors.
     """
     st.markdown(
-        """
+        f"""
         <style>
             /* 1. Hide the default Streamlit Sidebar elements */
-            [data-testid="stSidebar"] { display: none; }
-            [data-testid="collapsedControl"] { display: none; }
+            [data-testid="stSidebar"] {{ display: none; }}
+            [data-testid="collapsedControl"] {{ display: none; }}
             
             /* 2. Main Layout Adjustment */
-            .stApp {
-                background-color: #0E1117; /* Deep Slate / Black */
-                color: #FFFFFF;
-            }
+            .stApp {{
+                background-color: {THEME['bg_base']}; /* Fixed: Deep Zinc */
+                color: {THEME['text_primary']};
+            }}
 
-            .block-container {
+            .block-container {{
                 padding-top: 4rem; 
                 padding-bottom: 2rem;
                 padding-left: 2rem;
                 padding-right: 2rem;
                 max_width: 100%;
-            }
+            }}
 
             /* 3. TECH BUTTON STYLING */
-            /* Target ALL buttons. We use 'background' shorthand to nuking any default gradients/images. */
-            div.stButton > button {
+            /* Target ALL buttons. Using "Industrial" tactile feel instead of "Neon" */
+            div.stButton > button {{
                 width: 100%;
-                background: #1F2129 !important; /* Force Dark Background (Shorthand) */
-                background-color: #1F2129 !important;
-                color: #FFFFFF !important; 
-                border: 1px solid #41444C !important; /* Force Dark Border */
+                background: {THEME['bg_panel']} !important; 
+                background-color: {THEME['bg_panel']} !important;
+                color: {THEME['text_primary']} !important; 
+                border: 1px solid {THEME['border_subtle']} !important; 
                 border-radius: 4px;
                 
-                /* SIZE ADJUSTMENT: Matches standard input height (approx 42px) */
+                /* SIZE ADJUSTMENT: Preserved from original */
                 min-height: 42px !important; 
                 height: auto !important;
                 padding-top: 0.25rem !important;
                 padding-bottom: 0.25rem !important;
 
-                font-family: 'Source Sans Pro', sans-serif;
-                font-weight: 700 !important;
+                font-family: 'Inter', 'Source Sans Pro', sans-serif;
+                font-weight: 600 !important;
                 letter-spacing: 0.5px;
                 transition: all 0.2s ease-in-out; 
-                box-shadow: none !important;
-            }
+                box-shadow: {THEME['shadow_subtle']} !important; /* Fixed: Removed Glow */
+            }}
             
-            /* Force text inside button to be white */
-            div.stButton > button p {
-                color: #FFFFFF !important;
-            }
+            div.stButton > button p {{
+                color: {THEME['text_primary']} !important;
+            }}
 
             /* Focus/Active States */
             div.stButton > button:focus,
-            div.stButton > button:active {
-                background: #1F2129 !important;
-                color: #FFFFFF !important;
-                border-color: #41444C !important;
+            div.stButton > button:active {{
+                background: {THEME['bg_input']} !important;
+                color: {THEME['text_primary']} !important;
+                border-color: {THEME['accent']} !important;
                 box-shadow: none !important;
-            }
+            }}
 
-            /* ACCENT: Cyan Border & Text on Hover */
-            div.stButton > button:hover {
-                background: #1F2129 !important; 
-                border-color: #00ADB5 !important; /* Cyan Accent */     
-                color: #00ADB5 !important;        /* Cyan Text */
-                box-shadow: 0 0 4px rgba(0, 173, 181, 0.3) !important; /* Subtle Glow */          
-            }
+            /* ACCENT: Amber Border & Text on Hover (Fixed: No Neon Glow) */
+            div.stButton > button:hover {{
+                background: {THEME['bg_input']} !important; 
+                border-color: {THEME['text_secondary']} !important; /* Subtle hover */     
+                color: {THEME['text_primary']} !important;        
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4) !important; /* Physical depth */          
+            }}
             
-            /* Hover Text Color */
-            div.stButton > button:hover p {
-                color: #00ADB5 !important;
-            }
+            div.stButton > button:hover p {{
+                color: {THEME['text_primary']} !important;
+            }}
             
             /* 4. GLOBAL TEXT STYLING */
-            h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown, .stText, .stCaption {
-                color: #FFFFFF !important;
-                font-weight: 600 !important; 
-            }
+            h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown, .stText, .stCaption {{
+                color: {THEME['text_primary']} !important;
+                font-weight: 500 !important; 
+            }}
 
-            /* FIX FOR MULTI-LINE HEADERS (st.subheader with \n) */
-            /* Forces <p> tags created by newlines inside headers to match the header size */
+            /* FIX FOR MULTI-LINE HEADERS */
             h1 p, h2 p, h3 p, h4 p, h5 p, h6 p,
-            h1 span, h2 span, h3 span, h4 span, h5 span, h6 span {
+            h1 span, h2 span, h3 span, h4 span, h5 span, h6 span {{
                 font-size: inherit !important;
                 font-weight: inherit !important;
                 color: inherit !important;
                 line-height: 1.2 !important; 
                 margin-bottom: 0 !important;
-            }
+            }}
 
             /* 5. Tighter Dividers */
-            hr {
-                border-color: #41444C;
+            hr {{
+                border-color: {THEME['border_subtle']};
                 margin-top: 0.5em !important;
                 margin-bottom: 0.5em !important;
-            }
+            }}
 
             /* 6. EXPANDER (DATABOOK DROPDOWNS) FIX */
             
-            /* Target the HTML <details> and <summary> elements directly */
-            
-            /* The Container (Closed state usually) */
-            div[data-testid="stExpander"] details {
-                background-color: #1F2129 !important;
-                border-color: #41444C !important;
+            div[data-testid="stExpander"] details {{
+                background-color: {THEME['bg_panel']} !important;
+                border-color: {THEME['border_subtle']} !important;
                 border-radius: 4px;
-            }
+            }}
 
-            /* The Clickable Header (Summary) */
-            div[data-testid="stExpander"] summary {
-                background-color: #1F2129 !important;
-                color: #FFFFFF !important;
-                border: 1px solid #41444C !important;
+            div[data-testid="stExpander"] summary {{
+                background-color: {THEME['bg_panel']} !important;
+                color: {THEME['text_primary']} !important;
+                border: 1px solid {THEME['border_subtle']} !important;
                 border-radius: 4px;
                 transition: border-color 0.2s, color 0.2s;
-            }
+            }}
 
-            /* ACCENT: Hover state for the Expander Header */
-            div[data-testid="stExpander"] summary:hover {
-                background-color: #1F2129 !important; 
-                border-color: #00ADB5 !important; /* Cyan Border */
-                color: #00ADB5 !important; /* Cyan Text */
-            }
+            /* ACCENT: Hover state for the Expander Header - Uses Amber */
+            div[data-testid="stExpander"] summary:hover {{
+                background-color: {THEME['bg_panel']} !important; 
+                border-color: {THEME['accent']} !important; /* Amber Border */
+                color: {THEME['accent']} !important; /* Amber Text */
+            }}
 
-            /* Force the text inside the summary (the label) to be white/cyan */
             div[data-testid="stExpander"] summary span,
-            div[data-testid="stExpander"] summary p {
+            div[data-testid="stExpander"] summary p {{
                  color: inherit !important;
-            }
+            }}
 
-            /* The SVG Arrow inside the header */
-            div[data-testid="stExpander"] summary svg {
-                fill: #FFFFFF !important;
-            }
-            div[data-testid="stExpander"] summary:hover svg {
-                fill: #00ADB5 !important;
-            }
+            div[data-testid="stExpander"] summary svg {{
+                fill: {THEME['text_secondary']} !important;
+            }}
+            div[data-testid="stExpander"] summary:hover svg {{
+                fill: {THEME['accent']} !important;
+            }}
             
-            /* The Content Box that opens up */
-            div[data-testid="stExpander"] div[role="group"] {
-                 background-color: #0E1117 !important; /* Match main background */
-                 color: #FFFFFF !important;
-                 border: 1px solid #41444C;
-            }
+            div[data-testid="stExpander"] div[role="group"] {{
+                 background-color: {THEME['bg_base']} !important; 
+                 color: {THEME['text_primary']} !important;
+                 border: 1px solid {THEME['border_subtle']};
+                 border-top: none;
+            }}
 
             /* 7. CHECKBOX & INPUT FIXES INSIDE EXPANDER */
-            
-            /* Checkbox Label Text */
-            label[data-baseweb="checkbox"] span {
-                color: #FFFFFF !important;
-            }
+            label[data-baseweb="checkbox"] span {{
+                color: {THEME['text_primary']} !important;
+            }}
             
             /* 8. MULTISELECT & DROPDOWN LIST FIXES */
-
-            /* The Selected Tags (Chips) */
-            span[data-baseweb="tag"] {
-                background-color: #31333F !important; /* Distinct from bg */
-                color: #FFFFFF !important;
-                border: 1px solid #41444C;
-            }
+            span[data-baseweb="tag"] {{
+                background-color: {THEME['bg_input']} !important; 
+                color: {THEME['text_primary']} !important;
+                border: 1px solid {THEME['border_subtle']};
+            }}
             
-            /* The 'X' icon in tags */
-            span[data-baseweb="tag"] svg {
-                fill: #FFFFFF !important;
-            }
+            span[data-baseweb="tag"] svg {{
+                fill: {THEME['text_primary']} !important;
+            }}
             
-            /* The Dropdown Menu Container */
             div[data-baseweb="popover"],
-            div[data-baseweb="menu"] {
-                background-color: #1F2129 !important;
-                border: 1px solid #41444C !important;
-            }
+            div[data-baseweb="menu"] {{
+                background-color: {THEME['bg_panel']} !important;
+                border: 1px solid {THEME['border_subtle']} !important;
+            }}
             
-            /* The Options in the Dropdown */
-            li[role="option"] {
-                background-color: #1F2129 !important;
-                color: #FFFFFF !important;
-            }
+            li[role="option"] {{
+                background-color: {THEME['bg_panel']} !important;
+                color: {THEME['text_primary']} !important;
+            }}
             
-            /* Hover/Selected Option */
             li[role="option"]:hover,
-            li[role="option"][aria-selected="true"] {
-                background-color: #31333F !important;
-                color: #00ADB5 !important; /* Cyan Text */
-            }
+            li[role="option"][aria-selected="true"] {{
+                background-color: {THEME['bg_input']} !important;
+                color: {THEME['accent']} !important; /* Amber Text */
+            }}
             
-            /* Fix for MultiSelect Input Container Background */
-            div[data-baseweb="select"] > div {
-                background-color: #1F2129 !important;
-                color: #FFFFFF !important;
-                border-color: #41444C !important;
-            }
+            div[data-baseweb="select"] > div {{
+                background-color: {THEME['bg_panel']} !important;
+                color: {THEME['text_primary']} !important;
+                border-color: {THEME['border_subtle']} !important;
+            }}
 
             /* 9. NOTIFICATIONS & ALERTS (Toasts) */
+            div[data-testid="stToast"] {{
+                background-color: {THEME['bg_panel']} !important;
+                border: 1px solid {THEME['border_subtle']} !important;
+                color: {THEME['text_primary']} !important;
+            }}
             
-            div[data-testid="stToast"] {
-                background-color: #1F2129 !important;
-                border: 1px solid #41444C !important;
-                color: #FFFFFF !important;
-            }
-            
-            /* Ensure text inside toast is white */
             div[data-testid="stToast"] p, 
-            div[data-testid="stToast"] div {
-                color: #FFFFFF !important;
-            }
+            div[data-testid="stToast"] div {{
+                color: {THEME['text_primary']} !important;
+            }}
             
-            /* Alerts (st.success, st.info, etc) */
-            div[data-testid="stAlert"] {
-                background-color: #1F2129 !important;
-                color: #FFFFFF !important;
-                border: 1px solid #41444C;
-            }
+            div[data-testid="stAlert"] {{
+                background-color: {THEME['bg_panel']} !important;
+                color: {THEME['text_primary']} !important;
+                border: 1px solid {THEME['border_subtle']};
+            }}
             div[data-testid="stAlert"] p,
-            div[data-testid="stAlert"] div {
-                color: #FFFFFF !important;
-            }
+            div[data-testid="stAlert"] div {{
+                color: {THEME['text_primary']} !important;
+            }}
 
-            /* 10. CODE BLOCKS & TRACES (Fix for Cypher/Trace visibility) */
-            
-            /* The code block container */
-            div[data-testid="stCodeBlock"] {
-                background-color: #0E1117 !important;
-                border: 1px solid #41444C;
+            /* 10. CODE BLOCKS & TRACES */
+            div[data-testid="stCodeBlock"] {{
+                background-color: {THEME['bg_base']} !important;
+                border: 1px solid {THEME['border_subtle']};
                 border-radius: 4px;
-            }
+            }}
             
-            /* The code text itself */
-            code {
-                color: #00ADB5 !important; /* Cyan for code/traces */
+            code {{
+                color: {THEME['accent']} !important; /* Amber for code */
                 background-color: transparent !important; 
-                font-family: 'Courier New', monospace !important;
-            }
+                font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+            }}
             
-            /* Preformatted text blocks */
-            pre {
-                background-color: #0E1117 !important;
-                color: #FFFFFF !important;
-                border: 1px solid #41444C;
-            }
+            pre {{
+                background-color: {THEME['bg_base']} !important;
+                color: {THEME['text_primary']} !important;
+                border: 1px solid {THEME['border_subtle']};
+            }}
 
-            /* 11. JSON & RAW TEXT FIXES (For Traces/Debug Data) */
-            
-            /* Target the JSON viewer specifically (st.json) */
+            /* 11. JSON & RAW TEXT FIXES */
             div[data-testid="stJson"],
-            .react-json-view {
-                background-color: #0E1117 !important;
-                color: #FFFFFF !important;
-            }
+            .react-json-view {{
+                background-color: {THEME['bg_base']} !important;
+                color: {THEME['text_primary']} !important;
+            }}
             
-            /* Force keys/values in JSON to be visible */
-            .react-json-view span {
-                color: #00ADB5 !important; /* Cyan for values */
-            }
+            .react-json-view span {{
+                color: {THEME['accent']} !important; 
+            }}
             
-            /* st.text() raw output */
-            div[data-testid="stText"] {
-                background-color: #0E1117 !important;
-                color: #00ADB5 !important; /* Cyan for raw text logs */
-                font-family: 'Courier New', monospace !important;
-            }
+            div[data-testid="stText"] {{
+                background-color: {THEME['bg_base']} !important;
+                color: {THEME['accent']} !important;
+                font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+            }}
 
             /* 12. SETTINGS DIALOG (MODAL) FIXES */
+            div[role="dialog"][aria-modal="true"] {{
+                background-color: {THEME['bg_panel']} !important;
+                border: 1px solid {THEME['border_subtle']} !important;
+                color: {THEME['text_primary']} !important;
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5) !important;
+            }}
 
-            /* The Modal Background (The popup box itself) */
-            div[role="dialog"][aria-modal="true"] {
-                background-color: #1F2129 !important;
-                border: 1px solid #41444C !important;
-                color: #FFFFFF !important;
-            }
+            div[role="dialog"] header {{
+                background-color: {THEME['bg_panel']} !important;
+                color: {THEME['text_primary']} !important;
+            }}
 
-            /* Modal Header */
-            div[role="dialog"] header {
-                background-color: #1F2129 !important;
-                color: #FFFFFF !important;
-            }
-
-            /* Content Text inside Modal */
             div[role="dialog"] div, 
             div[role="dialog"] label,
-            div[role="dialog"] p {
-                color: #FFFFFF !important;
-            }
+            div[role="dialog"] p {{
+                color: {THEME['text_primary']} !important;
+            }}
 
-            /* Close Button (X) */
-            button[aria-label="Close"] {
-                color: #FFFFFF !important;
+            button[aria-label="Close"] {{
+                color: {THEME['text_primary']} !important;
                 background-color: transparent !important;
                 border: none !important;
-            }
-            button[aria-label="Close"]:hover {
-                color: #00ADB5 !important;
-            }
+            }}
+            button[aria-label="Close"]:hover {{
+                color: {THEME['accent']} !important;
+            }}
 
-            /* 13. VERTICAL SEPARATION LINES (Column Borders) - DEPTH-BASED SELECTOR */
+            /* 13. VERTICAL SEPARATION LINES (Column Borders) - THE CRITICAL FIX */
+            /* Removed 3px Hard Neon Border -> Replaced with 1px Subtle Border + Panel Background */
             
             /* LEFT FRAME (First Column) */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-of-type(1),
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1),
-            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {
-                border-right: 3px solid #00ADB5 !important; 
-                background-color: #14171F; 
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1) {{
+                border-right: 1px solid {THEME['border_subtle']} !important; /* Fixed: 3px -> 1px */
+                background-color: {THEME['bg_panel']}; /* Fixed: Distinct Panel Color */
                 padding: 1rem !important;
                 min-height: 85vh; 
-                box-shadow: 5px 0 15px -5px rgba(0, 173, 181, 0.4); 
-            }
+                box-shadow: none; /* Fixed: Removed Neon Glow */
+            }}
             
             /* RIGHT FRAME (Last Column) */
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
             .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child,
             .block-container > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child,
-            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
-                border-left: 3px solid #00ADB5 !important;
-                background-color: #14171F;
+            .block-container > div > div > div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {{
+                border-left: 1px solid {THEME['border_subtle']} !important; /* Fixed: 3px -> 1px */
+                background-color: {THEME['bg_panel']};
                 padding: 1rem !important;
                 min-height: 85vh;
-                box-shadow: -5px 0 15px -5px rgba(0, 173, 181, 0.4); 
-            }
+                box-shadow: none;
+            }}
             
-            /* Reset nested columns just in case */
+            /* Reset nested columns */
             [data-testid="stColumn"] [data-testid="stHorizontalBlock"] [data-testid="stColumn"],
-            [data-testid="column"] [data-testid="stHorizontalBlock"] [data-testid="column"] {
+            [data-testid="column"] [data-testid="stHorizontalBlock"] [data-testid="column"] {{
                 border: none !important;
                 background-color: transparent !important;
                 box-shadow: none !important;
                 min-height: 0 !important;
                 padding: 0 !important;
-            }
+            }}
 
-            /* 14. SEARCH BAR & TEXT INPUT FIXES (FIXING WHITE-ON-WHITE) */
+            /* 14. SEARCH BAR & TEXT INPUT FIXES */
             
-            /* The Container */
-            div[data-testid="stTextInput"] div[data-baseweb="input"] {
-                background-color: #1F2129 !important;
-                border-color: #41444C !important;
+            div[data-testid="stTextInput"] div[data-baseweb="input"] {{
+                background-color: {THEME['bg_panel']} !important;
+                border-color: {THEME['border_subtle']} !important;
                 border-radius: 4px;
-            }
+            }}
             
-            /* The Input Field Itself */
-            div[data-testid="stTextInput"] input {
-                color: #FFFFFF !important;  
-                background-color: #1F2129 !important;
-                caret-color: #00ADB5 !important; /* Cyan caret */
-            }
+            div[data-testid="stTextInput"] input {{
+                color: {THEME['text_primary']} !important;  
+                background-color: {THEME['bg_panel']} !important;
+                caret-color: {THEME['accent']} !important; /* Amber caret */
+            }}
             
-            /* Placeholder Text */
-            div[data-testid="stTextInput"] input::placeholder {
-                color: #B0B0B0 !important;
-            }
+            div[data-testid="stTextInput"] input::placeholder {{
+                color: {THEME['text_secondary']} !important;
+            }}
 
-            /* Focus state for text input */
-            div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within {
-                border-color: #00ADB5 !important;
-                box-shadow: 0 0 2px rgba(0, 173, 181, 0.5);
-            }
+            div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within {{
+                border-color: {THEME['accent']} !important;
+                box-shadow: 0 0 0 1px {THEME['accent']} !important; /* Clean focus ring, no fuzz */
+            }}
         </style>
         """,
         unsafe_allow_html=True
     )
+    
 accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
 def set_page(page_name):
