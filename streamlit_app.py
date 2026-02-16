@@ -2676,7 +2676,7 @@ def main():
         st.button(f"Evidence Cart",  use_container_width=True,
                   on_click=set_page, args=("Evidence Cart",))
             
-        st.button("📈 Analysis",  use_container_width=True,
+        st.button("Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
             
 
