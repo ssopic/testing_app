@@ -1708,7 +1708,7 @@ def screen_locker():
 #############################################################################
 @st.fragment
 def screen_analysis():
-    st.title("🔬 Analysis Pane (Agentic)")
+    st.title("Analysis Pane")
     
     # 1. Retrieve State
     ids = list(st.session_state.app_state.get("selected_ids", []))
