@@ -2587,7 +2587,7 @@ def inject_custom_css():
         unsafe_allow_html=True
     )
     
-accent_line = "<hr style='border: 2px solid #00ADB5; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
+accent_line = "<hr style='border: 2px solid #3f3f46; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
 def set_page(page_name):
     """Helper to update the current page in session state."""
