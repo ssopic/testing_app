@@ -847,13 +847,23 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
     # 1. CYPHER FOR "CONNECTIONS" VIEW
     # ==========================================
     if selector_type == "Connections":
-        # In Connections view, active items are relationship types
         rel_types = [item['name'] for item in active_items]
         formatted_rels = json.dumps(rel_types)
         
+        # FIX: Added filtering logic for Connections view
+        source_filter = ""
+        if selected_sources:
+            formatted_sources = json.dumps(list(selected_sources))
+            source_filter = f"\n      AND any(label IN labels(n) WHERE label IN {formatted_sources})"
+            
+        target_filter = ""
+        if selected_targets:
+            formatted_targets = json.dumps(list(selected_targets))
+            target_filter = f"\n      AND any(label IN labels(m) WHERE label IN {formatted_targets})"
+        
         cypher = f"""
     MATCH (n)-[r]-(m)
-    WHERE type(r) IN {formatted_rels}
+    WHERE type(r) IN {formatted_rels}{source_filter}{target_filter}
     RETURN 
         labels(n)[0] AS source_label, 
         type(r) AS edge, 
