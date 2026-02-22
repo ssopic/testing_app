@@ -93,7 +93,7 @@ def get_db_driver():
 def fetch_inventory_from_db():
     """
     Refactored Fallback: Generates the inventory dict with strict segregation.
-    Uses EXISTS subqueries for robust filtering of Semantic vs Lexical nodes.
+    Uses pattern matching and sizing for robust filtering of Semantic vs Lexical nodes.
     """
     inventory = {"Entities": {}, "Connections": {}, "Text Mentions": {}}
     driver = get_db_driver()
@@ -109,11 +109,11 @@ def fetch_inventory_from_db():
             
             for label in labels:
                 # --- A. ENTITIES (Semantic Priority) ---
-                # Nodes that have AT LEAST ONE outgoing Semantic relationship.
+                # Matches only nodes that have at least one relationship that is NOT 'MENTIONED_IN'
                 q_entities = f"""
-                MATCH (n:`{label}`)
-                WHERE n.name IS NOT NULL
-                AND EXISTS {{ (n)-[r]-() WHERE type(r) <> 'MENTIONED_IN' }}
+                MATCH (n:`{label}`)-[r]-()
+                WHERE n.name IS NOT NULL 
+                  AND type(r) <> 'MENTIONED_IN'
                 RETURN DISTINCT n.name as name
                 """
                 names_entities = [r["name"] for r in session.run(q_entities)]
@@ -121,12 +121,11 @@ def fetch_inventory_from_db():
                     inventory["Entities"][label] = sorted(names_entities)
 
                 # --- B. TEXT MENTIONS (Purely Lexical) ---
-                # Nodes that have MENTIONED_IN but NO outgoing Semantic relationships.
+                # Matches nodes with MENTIONED_IN, but verifies they have ZERO relationships of any other type
                 q_lexical = f"""
-                MATCH (n:`{label}`)
+                MATCH (n:`{label}`)-[:MENTIONED_IN]->()
                 WHERE n.name IS NOT NULL
-                AND EXISTS {{ (n)-[:MENTIONED_IN]->() }}
-                AND NOT EXISTS {{ (n)-[r]->() WHERE type(r) <> 'MENTIONED_IN' }}
+                  AND size([(n)-[r]-() WHERE type(r) <> 'MENTIONED_IN' | r]) = 0
                 RETURN DISTINCT n.name as name
                 """
                 names_lexical = [r["name"] for r in session.run(q_lexical)]
@@ -135,7 +134,6 @@ def fetch_inventory_from_db():
 
             # 2. POPULATE VERBS (Relationships - Semantic Only)
             rels_result = session.run("CALL db.relationshipTypes()")
-            # Exclude MENTIONED_IN from the available connections list
             rels = [r[0] for r in rels_result if r[0] != "MENTIONED_IN"]
             
             for r_type in rels:
