@@ -675,88 +675,80 @@ def render_explorer_workspace(selector_type, selected_items):
         st.markdown(accent_line, unsafe_allow_html=True)
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         if st.button("Add Evidence to Cart", type="primary"):
-            # Generate the dynamic Cypher based on current UI state
-            cypher, params = generate_cart_cypher(
-                st.session_state.active_explorer_items, 
-                selected_edges, # Replace with the actual variable holding selected relationships
-                selected_targets # Replace with the actual variable holding selected targets
-            )
-            
-            # Append the declarative logic to the cart rather than just the dataframe snapshot
-            st.session_state.evidence_cart.append({
-                "source": "Manual Analysis",
-                "cypher": cypher,
-                "params": params,
-                "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
-            })
-            st.success("Evidence query successfully added to cart!")
+    # Generate the dynamic Cypher based on current UI state
+    cypher = generate_cart_cypher(
+        st.session_state.active_explorer_items, 
+        selected_edges, # Replace with the actual variable holding selected relationships
+        selected_targets # Replace with the actual variable holding selected targets
+    )
+    
+    # Append the declarative logic to the cart rather than just the dataframe snapshot
+    st.session_state.evidence_cart.append({
+        "source": "Manual Analysis",
+        "cypher": cypher,
+        "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
+    })
+    st.success("Evidence query successfully added to cart!")
 
-        # =====================================================================
-        # TESTING BLOCK: Drop this right below the Add to Cart button
-        # =====================================================================
-        st.divider()
-        with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
-            st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
-            
-            if st.button("Run Cypher Parity Test"):
-                test_cypher, test_params = generate_cart_cypher(
-                    st.session_state.active_explorer_items, 
-                    selected_edges, 
-                    selected_targets
-                )
-                
-                # --- NEO4J BROWSER MANUAL TESTING HELPERS ---
-                st.markdown("**How to test manually in Neo4j Browser:**")
-                st.markdown("1. Run this parameter command first to load variables into your session:")
-                param_str = json.dumps(test_params)
-                st.code(f":param {param_str}", language="cypher")
-                
-                st.markdown("2. Then run the actual Cypher query:")
-                st.code(test_cypher, language="cypher")
-                # --------------------------------------------
-                
-                try:
-                    # ==============================================================
-                    # USE APP CACHED DRIVER FOR TESTING
-                    # ==============================================================
-                    driver = get_db_driver()
-                    
-                    if not driver:
-                        st.error("Could not retrieve Neo4j driver from session state. Ensure your app is connected to the database.")
-                    else:
-                        with driver.session() as session:
-                            # In python, **test_params safely injects the variables automatically
-                            result = session.run(test_cypher, **test_params)
-                            records = [dict(record) for record in result]
-                        
-                        # Flatten the id_list to count distinct items
-                        flattened_db_ids = []
-                        for rec in records:
-                            if not rec.get('id_list'):
-                                continue
-                            for item in rec['id_list']:
-                                if isinstance(item, list):
-                                    flattened_db_ids.extend(item)
-                                elif item is not None:
-                                    flattened_db_ids.append(item)
-                                    
-                        distinct_db_ids = set(flattened_db_ids)
-                        
-                        # Display metrics to see where the data drop-off is occurring
-                        col_a, col_b = st.columns(2)
-                        col_a.metric("Raw Rows Returned", len(records))
-                        col_b.metric("Distinct IDs Found", len(distinct_db_ids))
-                        
-                        if len(records) > 0 and len(distinct_db_ids) == 0:
-                            st.warning("⚠️ The query found matching paths, but `r.source_pks` and `m.doc_id` were null for all of them. Double check your Neo4j schema properties.")
-                        elif len(records) == 0:
-                            st.warning("⚠️ The query ran successfully but found 0 matching paths. Try expanding your edge/target filters.")
+# =====================================================================
+# TESTING BLOCK: Drop this right below the Add to Cart button
+# =====================================================================
+st.divider()
+with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
+    st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
+    
+    if st.button("Run Cypher Parity Test"):
+        test_cypher = generate_cart_cypher(
+            st.session_state.active_explorer_items, 
+            selected_edges, 
+            selected_targets
+        )
         
-                        st.write("**Raw Cypher Results:**")
-                        st.dataframe(records)
-                    
-                except Exception as e:
-                    st.error(f"Error executing test Cypher: {e}")
+        st.markdown("**Self-Contained Cypher Query:**")
+        st.code(test_cypher, language="cypher")
+        
+        try:
+            # ==============================================================
+            # USE APP CACHED DRIVER FOR TESTING
+            # ==============================================================
+            driver = get_db_driver()
+            
+            if not driver:
+                st.error("Could not retrieve Neo4j driver from session state. Ensure your app is connected to the database.")
+            else:
+                with driver.session() as session:
+                    # Run the self-contained query directly, no parameters needed
+                    result = session.run(test_cypher)
+                    records = [dict(record) for record in result]
+                
+                # Flatten the id_list to count distinct items
+                flattened_db_ids = []
+                for rec in records:
+                    if not rec.get('id_list'):
+                        continue
+                    for item in rec['id_list']:
+                        if isinstance(item, list):
+                            flattened_db_ids.extend(item)
+                        elif item is not None:
+                            flattened_db_ids.append(item)
+                            
+                distinct_db_ids = set(flattened_db_ids)
+                
+                # Display metrics to see where the data drop-off is occurring
+                col_a, col_b = st.columns(2)
+                col_a.metric("Raw Rows Returned", len(records))
+                col_b.metric("Distinct IDs Found", len(distinct_db_ids))
+                
+                if len(records) > 0 and len(distinct_db_ids) == 0:
+                    st.warning("⚠️ The query found matching paths, but `r.source_pks` and `m.doc_id` were null for all of them. Double check your Neo4j schema properties.")
+                elif len(records) == 0:
+                    st.warning("⚠️ The query ran successfully but found 0 matching paths. Try expanding your edge/target filters.")
+
+                st.write("**Raw Cypher Results:**")
+                st.dataframe(records)
+            
+        except Exception as e:
+            st.error(f"Error executing test Cypher: {e}")
             # # current safe version, delete if everything works
         # if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
         #     if not unique_ids:
@@ -792,12 +784,11 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
     The values are directly injected into the Cypher string so it is fully self-contained.
     """
     if not active_items:
-        return "", {}
+        return ""
 
     # Group active items by label to optimize the MATCH clause
     label_groups = defaultdict(list)
     for item in active_items:
-        # The UI stores the identifier in 'name', but the DB uses 'id'
         label_groups[item['label']].append(item['name'])
 
     source_clauses = []
@@ -806,29 +797,35 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
     # Using json.dumps to format lists of strings correctly for Cypher (e.g., ["A", "B"])
     for label, names in label_groups.items():
         formatted_names = json.dumps(names)
+        # Reverted to n.name
         source_clauses.append(f"(n:`{label}` AND n.name IN {formatted_names})")
 
     source_where = " OR ".join(source_clauses)
 
-    # Format edges and targets directly into lists for the Cypher string
-    formatted_edges = json.dumps(list(selected_edges)) if selected_edges is not None else "[]"
-    formatted_targets = json.dumps(list(selected_targets)) if selected_targets is not None else "[]"
+    # Conditionally build edge and target filters
+    # If the lists are empty, we omit the condition entirely
+    edge_filter = ""
+    if selected_edges:
+        formatted_edges = json.dumps(list(selected_edges))
+        edge_filter = f"\n      AND type(r) IN {formatted_edges}"
+
+    target_filter = ""
+    if selected_targets:
+        formatted_targets = json.dumps(list(selected_targets))
+        target_filter = f"\n      AND any(label IN labels(m) WHERE label IN {formatted_targets})"
 
     # Construct the final Cypher query with the values hardcoded into the text
     cypher = f"""
     MATCH (n)-[r]-(m)
-    WHERE ({source_where})
-      AND type(r) IN {formatted_edges}
-      AND any(label IN labels(m) WHERE label IN {formatted_targets})
+    WHERE ({source_where}){edge_filter}{target_filter}
     RETURN 
-        n.id AS source, 
+        n.name AS source, 
         type(r) AS edge, 
         labels(m) AS target_labels,
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
     
-    # Returning an empty dictionary for params since the Cypher string is now self-contained
-    return cypher, {}
+    return cypher
     
     
 # ==========================================
