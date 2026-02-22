@@ -691,72 +691,72 @@ def render_explorer_workspace(selector_type, selected_items):
             })
             st.success("Evidence query successfully added to cart!")
 
-# =====================================================================
-# TESTING BLOCK: Drop this right below the Add to Cart button
-# =====================================================================
-st.divider()
-with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
-    st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
-    
-    if st.button("Run Cypher Parity Test"):
-        test_cypher, test_params = generate_cart_cypher(
-            st.session_state.active_explorer_items, 
-            selected_edges, 
-            selected_targets
-        )
-        
-        # --- NEO4J BROWSER MANUAL TESTING HELPERS ---
-        st.markdown("**How to test manually in Neo4j Browser:**")
-        st.markdown("1. Run this parameter command first to load variables into your session:")
-        param_str = json.dumps(test_params)
-        st.code(f":param {param_str}", language="cypher")
-        
-        st.markdown("2. Then run the actual Cypher query:")
-        st.code(test_cypher, language="cypher")
-        # --------------------------------------------
-        
-        try:
-            # ==============================================================
-            # USE APP CACHED DRIVER FOR TESTING
-            # ==============================================================
-            driver = get_db_driver()
+        # =====================================================================
+        # TESTING BLOCK: Drop this right below the Add to Cart button
+        # =====================================================================
+        st.divider()
+        with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
+            st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
             
-            if not driver:
-                st.error("Could not retrieve Neo4j driver from session state. Ensure your app is connected to the database.")
-            else:
-                with driver.session() as session:
-                    # In python, **test_params safely injects the variables automatically
-                    result = session.run(test_cypher, **test_params)
-                    records = [dict(record) for record in result]
+            if st.button("Run Cypher Parity Test"):
+                test_cypher, test_params = generate_cart_cypher(
+                    st.session_state.active_explorer_items, 
+                    selected_edges, 
+                    selected_targets
+                )
                 
-                # Flatten the id_list to count distinct items
-                flattened_db_ids = []
-                for rec in records:
-                    if not rec.get('id_list'):
-                        continue
-                    for item in rec['id_list']:
-                        if isinstance(item, list):
-                            flattened_db_ids.extend(item)
-                        elif item is not None:
-                            flattened_db_ids.append(item)
-                            
-                distinct_db_ids = set(flattened_db_ids)
+                # --- NEO4J BROWSER MANUAL TESTING HELPERS ---
+                st.markdown("**How to test manually in Neo4j Browser:**")
+                st.markdown("1. Run this parameter command first to load variables into your session:")
+                param_str = json.dumps(test_params)
+                st.code(f":param {param_str}", language="cypher")
                 
-                # Display metrics to see where the data drop-off is occurring
-                col_a, col_b = st.columns(2)
-                col_a.metric("Raw Rows Returned", len(records))
-                col_b.metric("Distinct IDs Found", len(distinct_db_ids))
+                st.markdown("2. Then run the actual Cypher query:")
+                st.code(test_cypher, language="cypher")
+                # --------------------------------------------
                 
-                if len(records) > 0 and len(distinct_db_ids) == 0:
-                    st.warning("⚠️ The query found matching paths, but `r.source_pks` and `m.doc_id` were null for all of them. Double check your Neo4j schema properties.")
-                elif len(records) == 0:
-                    st.warning("⚠️ The query ran successfully but found 0 matching paths. Try expanding your edge/target filters.")
-
-                st.write("**Raw Cypher Results:**")
-                st.dataframe(records)
-            
-        except Exception as e:
-            st.error(f"Error executing test Cypher: {e}")
+                try:
+                    # ==============================================================
+                    # USE APP CACHED DRIVER FOR TESTING
+                    # ==============================================================
+                    driver = get_db_driver()
+                    
+                    if not driver:
+                        st.error("Could not retrieve Neo4j driver from session state. Ensure your app is connected to the database.")
+                    else:
+                        with driver.session() as session:
+                            # In python, **test_params safely injects the variables automatically
+                            result = session.run(test_cypher, **test_params)
+                            records = [dict(record) for record in result]
+                        
+                        # Flatten the id_list to count distinct items
+                        flattened_db_ids = []
+                        for rec in records:
+                            if not rec.get('id_list'):
+                                continue
+                            for item in rec['id_list']:
+                                if isinstance(item, list):
+                                    flattened_db_ids.extend(item)
+                                elif item is not None:
+                                    flattened_db_ids.append(item)
+                                    
+                        distinct_db_ids = set(flattened_db_ids)
+                        
+                        # Display metrics to see where the data drop-off is occurring
+                        col_a, col_b = st.columns(2)
+                        col_a.metric("Raw Rows Returned", len(records))
+                        col_b.metric("Distinct IDs Found", len(distinct_db_ids))
+                        
+                        if len(records) > 0 and len(distinct_db_ids) == 0:
+                            st.warning("⚠️ The query found matching paths, but `r.source_pks` and `m.doc_id` were null for all of them. Double check your Neo4j schema properties.")
+                        elif len(records) == 0:
+                            st.warning("⚠️ The query ran successfully but found 0 matching paths. Try expanding your edge/target filters.")
+        
+                        st.write("**Raw Cypher Results:**")
+                        st.dataframe(records)
+                    
+                except Exception as e:
+                    st.error(f"Error executing test Cypher: {e}")
             # # current safe version, delete if everything works
         # if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
         #     if not unique_ids:
