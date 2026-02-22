@@ -93,7 +93,7 @@ def get_db_driver():
 def fetch_inventory_from_db():
     """
     Refactored Fallback: Generates the inventory dict with strict segregation.
-    Uses EXISTS subqueries for robust filtering of Semantic vs Lexical nodes.
+    Uses pattern matching and sizing for robust filtering of Semantic vs Lexical nodes.
     """
     inventory = {"Entities": {}, "Connections": {}, "Text Mentions": {}}
     driver = get_db_driver()
@@ -109,11 +109,11 @@ def fetch_inventory_from_db():
             
             for label in labels:
                 # --- A. ENTITIES (Semantic Priority) ---
-                # Nodes that have AT LEAST ONE outgoing Semantic relationship.
+                # Matches only nodes that have at least one relationship that is NOT 'MENTIONED_IN'
                 q_entities = f"""
-                MATCH (n:`{label}`)
-                WHERE n.name IS NOT NULL
-                AND EXISTS {{ (n)-[r]-() WHERE type(r) <> 'MENTIONED_IN' }}
+                MATCH (n:`{label}`)-[r]->()
+                WHERE n.name IS NOT NULL 
+                  AND type(r) <> 'MENTIONED_IN'
                 RETURN DISTINCT n.name as name
                 """
                 names_entities = [r["name"] for r in session.run(q_entities)]
@@ -121,12 +121,9 @@ def fetch_inventory_from_db():
                     inventory["Entities"][label] = sorted(names_entities)
 
                 # --- B. TEXT MENTIONS (Purely Lexical) ---
-                # Nodes that have MENTIONED_IN but NO outgoing Semantic relationships.
                 q_lexical = f"""
-                MATCH (n:`{label}`)
+                MATCH (n:`{label}`)-[:MENTIONED_IN]->()
                 WHERE n.name IS NOT NULL
-                AND EXISTS {{ (n)-[:MENTIONED_IN]->() }}
-                AND NOT EXISTS {{ (n)-[r]->() WHERE type(r) <> 'MENTIONED_IN' }}
                 RETURN DISTINCT n.name as name
                 """
                 names_lexical = [r["name"] for r in session.run(q_lexical)]
@@ -135,7 +132,6 @@ def fetch_inventory_from_db():
 
             # 2. POPULATE VERBS (Relationships - Semantic Only)
             rels_result = session.run("CALL db.relationshipTypes()")
-            # Exclude MENTIONED_IN from the available connections list
             rels = [r[0] for r in rels_result if r[0] != "MENTIONED_IN"]
             
             for r_type in rels:
@@ -159,9 +155,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
 
     try:
         with driver.session() as session:
-            # --- CASE A: RELATIONSHIP CENTRIC (CONNECTIONS) ---
             if selector_type == "Connections":
-                # Strict Semantic: Exclude MENTIONED_IN entirely
                 query = """
                 MATCH (n)-[r]->(m)
                 WHERE type(r) IN $names 
@@ -176,32 +170,27 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 data = [r.data() for r in result]
                 return pd.DataFrame(data)
 
-            # --- CASE B: TEXT MENTIONS (PURE LEXICAL) ---
             elif selector_type == "Text Mentions":
-                # Pure Lexical: Fetch only MENTIONED_IN
-                # Logic: Fetch MENTIONED_IN edges, but return columns compatible with Entity View
                 query = f"""
                 MATCH (n:`{label}`)-[r:MENTIONED_IN]->(m:Document)
                 WHERE n.name IN $names
                 RETURN 
-                    type(r) as edge,            // Returns "MENTIONED_IN"
+                    type(r) as edge,
                     labels(n)[0] as node, 
                     coalesce(n.name, 'Unknown') as node_name, 
                     count(m) as count,
-                    'Document' as connected_node_label, // Explicit Target Label
+                    'Document' as connected_node_label, 
                     collect(coalesce(r.source_pks, m.doc_id)) as id_list
                 """
                 result = session.run(query, names=names)
                 data = [r.data() for r in result]
                 return pd.DataFrame(data)
             
-            # --- CASE C: NODE CENTRIC (ENTITIES) ---
-            else:
-                # Hybrid: Fetch EVERYTHING (Semantic + Lexical)
-                # We do NOT filter out MENTIONED_IN here because we need it for the subtraction logic.
+            elif selector_type == "Entities":
                 query = f"""
                 MATCH (n:`{label}`)-[r]->(m)
                 WHERE n.name IN $names
+                    AND type(r) <> 'MENTIONED_IN'
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as node, 
@@ -212,10 +201,10 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 """
                 result = session.run(query, names=names)
                 data = [r.data() for r in result]
-                df = pd.DataFrame(data)
+                return pd.DataFrame(data)
                 
-                # Apply Semantic Priority Logic (Subtract Semantic IDs from Lexical IDs)
-                return process_entity_sunburst_logic(df)
+            else:
+                return pd.DataFrame()
             
     except Exception as e:
         st.error(f"Live Query failed: {e}")
@@ -311,45 +300,46 @@ def flatten_ids(container):
         ids.add(container)
     return ids
 
-def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Implements the "Semantic Priority" logic.
-    1. Identify Semantic IDs (from non-MENTIONED_IN edges).
-    2. Subtract Semantic IDs from MENTIONED_IN edges.
-    3. Remove MENTIONED_IN rows that become empty.
-    """
-    if df.empty or 'edge' not in df.columns or 'id_list' not in df.columns:
-        return df
+# #This function is used to
+# def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Implements the "Semantic Priority" logic.
+#     1. Identify Semantic IDs (from non-MENTIONED_IN edges).
+#     2. Subtract Semantic IDs from MENTIONED_IN edges.
+#     3. Remove MENTIONED_IN rows that become empty.
+#     """
+#     if df.empty or 'edge' not in df.columns or 'id_list' not in df.columns:
+#         return df
         
-    # Check if MENTIONED_IN even exists in this slice
-    if 'MENTIONED_IN' not in df['edge'].values:
-        return df
+#     # Check if MENTIONED_IN even exists in this slice
+#     if 'MENTIONED_IN' not in df['edge'].values:
+#         return df
 
-    # 1. Separate Semantic vs Lexical
-    semantic_df = df[df['edge'] != 'MENTIONED_IN'].copy()
-    lexical_df = df[df['edge'] == 'MENTIONED_IN'].copy()
+#     # 1. Separate Semantic vs Lexical
+#     semantic_df = df[df['edge'] != 'MENTIONED_IN'].copy()
+#     lexical_df = df[df['edge'] == 'MENTIONED_IN'].copy()
     
-    # 2. Collect all Semantic IDs into a set (FLATTENED)
-    # This prevents "unhashable type: list" errors if id_list contains nested lists
-    semantic_ids = set()
-    for ids in semantic_df['id_list']:
-        semantic_ids.update(flatten_ids(ids))
+#     # 2. Collect all Semantic IDs into a set (FLATTENED)
+#     # This prevents "unhashable type: list" errors if id_list contains nested lists
+#     semantic_ids = set()
+#     for ids in semantic_df['id_list']:
+#         semantic_ids.update(flatten_ids(ids))
             
-    # 3. Filter Lexical IDs
-    def filter_ids(row_ids):
-        # Flatten row_ids first
-        row_set = flatten_ids(row_ids)
-        # Subtract semantic IDs
-        return list(row_set - semantic_ids)
+#     # 3. Filter Lexical IDs
+#     def filter_ids(row_ids):
+#         # Flatten row_ids first
+#         row_set = flatten_ids(row_ids)
+#         # Subtract semantic IDs
+#         return list(row_set - semantic_ids)
         
-    lexical_df['id_list'] = lexical_df['id_list'].apply(filter_ids)
-    lexical_df['count'] = lexical_df['id_list'].apply(len)
+#     lexical_df['id_list'] = lexical_df['id_list'].apply(filter_ids)
+#     lexical_df['count'] = lexical_df['id_list'].apply(len)
     
-    # 4. Remove empty lexical rows
-    lexical_df = lexical_df[lexical_df['count'] > 0]
+#     # 4. Remove empty lexical rows
+#     lexical_df = lexical_df[lexical_df['count'] > 0]
     
-    # 5. Recombine
-    return pd.concat([semantic_df, lexical_df], ignore_index=True)
+#     # 5. Recombine
+#     return pd.concat([semantic_df, lexical_df], ignore_index=True)
 # ==============================================================================
 # UPDATED BACKEND: VERB SUPPORT
 # ==============================================================================
@@ -814,43 +804,33 @@ def render_explorer_workspace(selector_type, selected_items):
 
 # Generate cypher from cart items function. This should be able to properly output the cypher we generated by modifying the output from the cypher manually
 def generate_cart_cypher(active_items, selector_type, selected_edges=None, selected_targets=None, selected_sources=None):
-    """
-    Generates a dynamic Cypher query based on whether the user is analyzing Entities or Connections.
-    """
     if not active_items:
         return ""
 
-    # Safely convert to lists early to avoid NumPy/Pandas "ambiguous truth value" errors
     selected_edges = list(selected_edges) if selected_edges is not None else []
     selected_targets = list(selected_targets) if selected_targets is not None else []
     selected_sources = list(selected_sources) if selected_sources is not None else []
 
-    # ==========================================
-    # 1. CYPHER FOR "CONNECTIONS" VIEW
-    # ==========================================
     if selector_type == "Connections":
         rel_types = [item['name'] for item in active_items]
         formatted_rels = json.dumps(rel_types)
         
-        # In Connections view, the first UI dropdown (selected_edges) acts as the Source filter 
-        # if selected_sources isn't explicitly defined.
         actual_sources = selected_sources if len(selected_sources) > 0 else selected_edges
         
         source_filter = ""
         if len(actual_sources) > 0:
             formatted_sources = json.dumps(actual_sources)
-            # Match Pandas exact grouping by using labels(n)[0] instead of `any()`
             source_filter = f"\n      AND labels(n)[0] IN {formatted_sources}"
             
         target_filter = ""
         if len(selected_targets) > 0:
             formatted_targets = json.dumps(selected_targets)
-            # Match Pandas exact grouping by using labels(m)[0] instead of `any()`
             target_filter = f"\n      AND labels(m)[0] IN {formatted_targets}"
         
         cypher = f"""
     MATCH (n)-[r]->(m)
-    WHERE type(r) IN {formatted_rels}{source_filter}{target_filter}
+    WHERE type(r) IN {formatted_rels}
+      AND type(r) <> 'MENTIONED_IN'{source_filter}{target_filter}
     RETURN 
         labels(n)[0] AS source_label, 
         type(r) AS edge, 
@@ -859,10 +839,30 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
     """
         return cypher
 
-    # ==========================================
-    # 2. CYPHER FOR "ENTITIES" VIEW
-    # ==========================================
-    else:
+    elif selector_type == "Text Mentions":
+        label_groups = defaultdict(list)
+        for item in active_items:
+            label_groups[item['label']].append(item['name'])
+
+        source_clauses = []
+        for label, names in label_groups.items():
+            formatted_names = json.dumps(names)
+            source_clauses.append(f"(n:`{label}` AND n.name IN {formatted_names})")
+
+        source_where = " OR ".join(source_clauses) if source_clauses else "TRUE"
+
+        cypher = f"""
+    MATCH (n)-[r:MENTIONED_IN]->(m:Document)
+    WHERE {source_where}
+    RETURN 
+        n.name AS source_name, 
+        type(r) AS edge, 
+        labels(m)[0] AS target_label,
+        collect(coalesce(r.source_pks, m.doc_id)) AS id_list
+    """
+        return cypher
+
+    elif selector_type == "Entities":
         label_groups = defaultdict(list)
         for item in active_items:
             label_groups[item['label']].append(item['name'])
@@ -886,7 +886,8 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
 
         cypher = f"""
     MATCH (n)-[r]->(m)
-    WHERE ({source_where}){edge_filter}{target_filter}
+    WHERE ({source_where})
+      AND type(r) <> 'MENTIONED_IN'{edge_filter}{target_filter}
     RETURN 
         n.name AS source_name, 
         type(r) AS edge, 
@@ -894,6 +895,9 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
         return cypher
+        
+    else:
+        return ""
     
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
@@ -928,7 +932,7 @@ def screen_databook():
             selector_type = st.radio(
                 "Analysis Mode", 
                 ["Entities", "Connections", "Text Mentions"], 
-                captions=["Semantic (Node)", "Semantic (Verb)", "Lexical (Node)"],
+                captions=["Directed", "Directed", "Entity mentioned in Document"],
                 horizontal=True
             )
             
@@ -2932,7 +2936,8 @@ RELATIONSHIP_DEFINITIONS= {
     "SUPPLY": "Refers to the provision, delivery, or facilitation of goods, services, information, or access—often in response to a specific request or need. This includes the arrangement of physical items (such as tickets, books, or technology), the sharing of specialized knowledge or resources, and the coordination of logistical support. The language used is transactional and solution-oriented, emphasizing the ability to source, deliver, or enable access to desired assets or opportunities.",
     "SUPPORT": "Refers to the provision of assistance, encouragement, or backing—whether emotional, strategic, logistical, or professional—to an individual or group. This includes offering advice, sharing resources, advocating for someone’s position, or helping to navigate complex personal, political, or professional challenges. The language used is often empathetic, directive, or collaborative, reflecting a commitment to the recipient’s well-being, success, or resilience.",
     "TIMING": "Refers to the scheduling, coordination, or sequencing of events, meetings, or actions—often with strategic, logistical, or symbolic significance. This includes the arrangement of appointments, the alignment of activities with external events (such as anniversaries, deadlines, or political transitions), and the consideration of timing as a tactical element in negotiations, public relations, or personal interactions. The language used highlights urgency, opportunity, or the importance of synchronization.",
-    "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities."
+    "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities.",
+    "MENTIONED_IN": "In which document is the entity mentioned. CTRL+F"
 }
 def get_rel_definition(rel_name):
     """Helper to safely get a definition or a default prompt."""
