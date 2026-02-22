@@ -785,6 +785,7 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
     # Group active items by label to optimize the MATCH clause
     label_groups = defaultdict(list)
     for item in active_items:
+        # The UI stores the identifier in 'name', but the DB uses 'id'
         label_groups[item['label']].append(item['name'])
 
     source_clauses = []
@@ -793,14 +794,15 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
     # Build the WHERE clause dynamically for all selected source nodes
     for i, (label, names) in enumerate(label_groups.items()):
         param_key = f"names_{i}"
-        source_clauses.append(f"(n:`{label}` AND n.name IN ${param_key})")
+        # FIX: Changed n.name to n.id to match the graph schema
+        source_clauses.append(f"(n:`{label}` AND n.id IN ${param_key})")
         params[param_key] = names
 
     source_where = " OR ".join(source_clauses)
 
-    # Pass the user's filters as parameters
-    params['selected_edges'] = selected_edges
-    params['selected_targets'] = selected_targets
+    # Pass the user's filters as parameters - CAST TO LIST to prevent Pandas/Numpy serialization issues
+    params['selected_edges'] = list(selected_edges) if selected_edges is not None else []
+    params['selected_targets'] = list(selected_targets) if selected_targets is not None else []
 
     # Construct the final Cypher query incorporating the requested keys
     cypher = f"""
@@ -809,13 +811,12 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
       AND type(r) IN $selected_edges
       AND any(label IN labels(m) WHERE label IN $selected_targets)
     RETURN 
-        n.name AS source, 
+        n.id AS source, 
         type(r) AS edge, 
         labels(m) AS target_labels,
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
     
-    return cypher, params
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
 # ==========================================
