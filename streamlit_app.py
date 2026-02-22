@@ -1870,7 +1870,7 @@ def screen_locker():
                 # COSMETIC CHANGE: Show count instead of the full ID list
                 st.markdown(f"**Evidence Count:** `{len(entry['ids'])} documents`")
                 st.caption(f"Summary: {entry.get('answer', 'No description available.')}")
-                st.markdown(f"**Cypher:**  {entry['cypher']}"
+                st.markdown(f"**Cypher:**  {entry['cypher']}")
 
     # Commit selection back to the global state for the analyst
     st.session_state.app_state["selected_ids"] = current_selection
