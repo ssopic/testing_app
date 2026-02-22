@@ -789,6 +789,7 @@ def render_explorer_workspace(selector_type, selected_items):
 def generate_cart_cypher(active_items, selected_edges, selected_targets):
     """
     Generates a dynamic Cypher query based on the active items and current UI filters.
+    The values are directly injected into the Cypher string so it is fully self-contained.
     """
     if not active_items:
         return "", {}
@@ -800,35 +801,35 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
         label_groups[item['label']].append(item['name'])
 
     source_clauses = []
-    params = {}
 
     # Build the WHERE clause dynamically for all selected source nodes
-    for i, (label, names) in enumerate(label_groups.items()):
-        param_key = f"names_{i}"
-        # FIX: Changed n.name to n.id to match the graph schema
-        source_clauses.append(f"(n:`{label}` AND n.id IN ${param_key})")
-        params[param_key] = names
+    # Using json.dumps to format lists of strings correctly for Cypher (e.g., ["A", "B"])
+    for label, names in label_groups.items():
+        formatted_names = json.dumps(names)
+        source_clauses.append(f"(n:`{label}` AND n.id IN {formatted_names})")
 
     source_where = " OR ".join(source_clauses)
 
-    # Pass the user's filters as parameters - CAST TO LIST to prevent Pandas/Numpy serialization issues
-    params['selected_edges'] = list(selected_edges) if selected_edges is not None else []
-    params['selected_targets'] = list(selected_targets) if selected_targets is not None else []
+    # Format edges and targets directly into lists for the Cypher string
+    formatted_edges = json.dumps(list(selected_edges)) if selected_edges is not None else "[]"
+    formatted_targets = json.dumps(list(selected_targets)) if selected_targets is not None else "[]"
 
-    # Construct the final Cypher query incorporating the requested keys
+    # Construct the final Cypher query with the values hardcoded into the text
     cypher = f"""
     MATCH (n)-[r]-(m)
     WHERE ({source_where})
-      AND type(r) IN $selected_edges
-      AND any(label IN labels(m) WHERE label IN $selected_targets)
+      AND type(r) IN {formatted_edges}
+      AND any(label IN labels(m) WHERE label IN {formatted_targets})
     RETURN 
         n.id AS source, 
         type(r) AS edge, 
         labels(m) AS target_labels,
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
-    return cypher, params
-
+    
+    # Returning an empty dictionary for params since the Cypher string is now self-contained
+    return cypher, {}
+    
     
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
