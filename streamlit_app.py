@@ -1750,7 +1750,8 @@ def screen_extraction():
         # Chat UI: Iterate over chat_history in app_state
         for chat in st.session_state.app_state["chat_history"]:
             with st.chat_message(chat["role"]): st.write(chat["content"])
-        st.caption("*NOTE: The evidence output might have direction issues. In example if you ask for outgoing communication you might also get incoming. Make sure to view the evidence before making conclusions *")
+        st.caption("*NOTE: The evidence output might have direction issues. In example if you ask for outgoing communication you might (also) get incoming. Prefer asking for communication in general to obtain both sides and filter later. *")
+        st.caption("*Make sure to view the evidence before making conclusions.*")
 
         user_msg = st.chat_input("Ask about the graph...")
         if user_msg:
