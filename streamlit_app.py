@@ -676,41 +676,47 @@ def render_explorer_workspace(selector_type, selected_items):
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         if st.button("Add Evidence to Cart", type="primary"):
     # Generate the dynamic Cypher based on current UI state
-            cypher, params = generate_cart_cypher(
-                st.session_state.active_explorer_items, 
-                selected_edges, # Replace with the actual variable holding selected relationships
-                selected_targets # Replace with the actual variable holding selected targets
-            )
-            
-            # Append the declarative logic to the cart rather than just the dataframe snapshot
-            st.session_state.evidence_cart.append({
-                "source": "Manual Analysis",
-                "cypher": cypher,
-                "params": params,
-                "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
-            })
-            st.success("Evidence query successfully added to cart!")
+    cypher, params = generate_cart_cypher(
+        st.session_state.active_explorer_items, 
+        selected_edges, # Replace with the actual variable holding selected relationships
+        selected_targets # Replace with the actual variable holding selected targets
+    )
+    
+    # Append the declarative logic to the cart rather than just the dataframe snapshot
+    st.session_state.evidence_cart.append({
+        "source": "Manual Analysis",
+        "cypher": cypher,
+        "params": params,
+        "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
+    })
+    st.success("Evidence query successfully added to cart!")
+
+# =====================================================================
+# TESTING BLOCK: Drop this right below the Add to Cart button
+# =====================================================================
+st.divider()
+with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
+    st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
+    
+    if st.button("Run Cypher Parity Test"):
+        test_cypher, test_params = generate_cart_cypher(
+            st.session_state.active_explorer_items, 
+            selected_edges, 
+            selected_targets
+        )
         
-    # =====================================================================
-    # TESTING BLOCK: Drop this right below the Add to Cart button
-    # =====================================================================
-    st.divider()
-    with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
-        st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
+        st.code(test_cypher, language="cypher")
+        st.json(test_params)
         
-        if st.button("Run Cypher Parity Test"):
-            test_cypher, test_params = generate_cart_cypher(
-                st.session_state.active_explorer_items, 
-                selected_edges, 
-                selected_targets
-            )
+        try:
+            # ==============================================================
+            # USE APP CACHED DRIVER FOR TESTING
+            # ==============================================================
+            driver = get_db_driver()
             
-            st.code(test_cypher, language="cypher")
-            st.json(test_params)
-            
-            try:
-                # Connect to Neo4j using your app's existing driver connection
-                driver = st.session_state.neo4j_driver 
+            if not driver:
+                st.error("Could not retrieve Neo4j driver from session state. Ensure your app is connected to the database.")
+            else:
                 with driver.session() as session:
                     result = session.run(test_cypher, **test_params)
                     records = [dict(record) for record in result]
@@ -737,9 +743,9 @@ def render_explorer_workspace(selector_type, selected_items):
                 
                 st.write("**Raw Cypher Results:**")
                 st.dataframe(records)
-                
-            except Exception as e:
-                st.error(f"Error executing test Cypher: {e}")
+            
+        except Exception as e:
+            st.error(f"Error executing test Cypher: {e}")
             # # current safe version, delete if everything works
         # if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
         #     if not unique_ids:
