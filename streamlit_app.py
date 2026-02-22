@@ -300,49 +300,6 @@ def flatten_ids(container):
         ids.add(container)
     return ids
 
-# #This function is used to
-# def process_entity_sunburst_logic(df: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Implements the "Semantic Priority" logic.
-#     1. Identify Semantic IDs (from non-MENTIONED_IN edges).
-#     2. Subtract Semantic IDs from MENTIONED_IN edges.
-#     3. Remove MENTIONED_IN rows that become empty.
-#     """
-#     if df.empty or 'edge' not in df.columns or 'id_list' not in df.columns:
-#         return df
-        
-#     # Check if MENTIONED_IN even exists in this slice
-#     if 'MENTIONED_IN' not in df['edge'].values:
-#         return df
-
-#     # 1. Separate Semantic vs Lexical
-#     semantic_df = df[df['edge'] != 'MENTIONED_IN'].copy()
-#     lexical_df = df[df['edge'] == 'MENTIONED_IN'].copy()
-    
-#     # 2. Collect all Semantic IDs into a set (FLATTENED)
-#     # This prevents "unhashable type: list" errors if id_list contains nested lists
-#     semantic_ids = set()
-#     for ids in semantic_df['id_list']:
-#         semantic_ids.update(flatten_ids(ids))
-            
-#     # 3. Filter Lexical IDs
-#     def filter_ids(row_ids):
-#         # Flatten row_ids first
-#         row_set = flatten_ids(row_ids)
-#         # Subtract semantic IDs
-#         return list(row_set - semantic_ids)
-        
-#     lexical_df['id_list'] = lexical_df['id_list'].apply(filter_ids)
-#     lexical_df['count'] = lexical_df['id_list'].apply(len)
-    
-#     # 4. Remove empty lexical rows
-#     lexical_df = lexical_df[lexical_df['count'] > 0]
-    
-#     # 5. Recombine
-#     return pd.concat([semantic_df, lexical_df], ignore_index=True)
-# ==============================================================================
-# UPDATED BACKEND: VERB SUPPORT
-# ==============================================================================
 
 
 
