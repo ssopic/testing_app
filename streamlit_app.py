@@ -708,9 +708,6 @@ def render_explorer_workspace(selector_type, selected_items):
                         st.code(test_cypher, language="cypher")
                     
                     try:
-                        # ==============================================================
-                        # USE APP CACHED DRIVER FOR TESTING
-                        # ==============================================================
                         driver = get_db_driver()
                         
                         if not driver:
