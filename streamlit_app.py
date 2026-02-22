@@ -169,9 +169,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                     labels(n)[0] as source_node_label, 
                     labels(m)[0] as connected_node_label, 
                     count(*) as count,
-                    collect(coalesce(r.source_pks, m.doc_id)) as id_list
-                LIMIT 2000
-                """
+                    collect(coalesce(r.source_pks, m.doc_id)) as id_list"""
                 result = session.run(query, names=names)
                 data = [r.data() for r in result]
                 return pd.DataFrame(data)
@@ -1228,7 +1226,7 @@ def fetch_schema_statistics(uri: str, auth: tuple) -> Dict[str, Any]:
 
             for r_type in stats["RelationshipTypes"]:
                 try:
-                    verb_q = f"MATCH ()-[r:`{r_type}`]->() WHERE r.raw_verbs IS NOT NULL UNWIND r.raw_verbs as v RETURN DISTINCT v LIMIT 10"
+                    verb_q = f"MATCH ()-[r:`{r_type}`]->() WHERE r.raw_verbs IS NOT NULL UNWIND r.raw_verbs as v RETURN DISTINCT v "
                     verbs = [record["v"] for record in session.run(verb_q)]
                     stats["RelationshipVerbs"][r_type] = verbs
                 except: stats["RelationshipVerbs"][r_type] = []
@@ -1617,7 +1615,7 @@ def screen_extraction():
         if "manual_query_text" not in st.session_state:
             st.session_state.manual_query_text = ""
 
-        cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n LIMIT 5")
+        cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n")
         
         if st.button("Run Query"):
             if SAFETY_REGEX.search(cypher_input):
