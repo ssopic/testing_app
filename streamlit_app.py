@@ -1922,7 +1922,7 @@ def screen_locker():
                 st.markdown(f"**Evidence Count:** `{len(entry['ids'])} documents`")
                 st.caption(f"Summary: {entry.get('answer', 'No description available.')}")
                 # # Cypher showcase here is exclusively for testing purposes. Commented out for the user. 
-                #st.markdown(f"**Cypher:**  {entry['cypher']}")
+                st.markdown(f"**Cypher:**  {entry['cypher']}")
 
     # Commit selection back to the global state for the analyst
     st.session_state.app_state["selected_ids"] = current_selection
