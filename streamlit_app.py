@@ -163,7 +163,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
             if selector_type == "Connections":
                 # Strict Semantic: Exclude MENTIONED_IN entirely
                 query = """
-                MATCH (n)-[r]-(m)
+                MATCH (n)-[r]->(m)
                 WHERE type(r) IN $names 
                   AND type(r) <> 'MENTIONED_IN'
                 RETURN 
@@ -181,7 +181,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 # Pure Lexical: Fetch only MENTIONED_IN
                 # Logic: Fetch MENTIONED_IN edges, but return columns compatible with Entity View
                 query = f"""
-                MATCH (n:`{label}`)-[r:MENTIONED_IN]-(m:Document)
+                MATCH (n:`{label}`)-[r:MENTIONED_IN]->(m:Document)
                 WHERE n.name IN $names
                 RETURN 
                     type(r) as edge,            // Returns "MENTIONED_IN"
@@ -200,7 +200,7 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 # Hybrid: Fetch EVERYTHING (Semantic + Lexical)
                 # We do NOT filter out MENTIONED_IN here because we need it for the subtraction logic.
                 query = f"""
-                MATCH (n:`{label}`)-[r]-(m)
+                MATCH (n:`{label}`)-[r]->(m)
                 WHERE n.name IN $names
                 RETURN 
                     type(r) as edge, 
