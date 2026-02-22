@@ -197,11 +197,10 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
             
             # --- CASE C: NODE CENTRIC (ENTITIES) ---
             else:
-                # Hybrid: Fetch EVERYTHING (Semantic + Lexical)
-                # We do NOT filter out MENTIONED_IN here because we need it for the subtraction logic.
                 query = f"""
                 MATCH (n:`{label}`)-[r]->(m)
                 WHERE n.name IN $names
+                    AND type(r) <> 'MENTIONED_IN'
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as node, 
