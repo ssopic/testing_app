@@ -7,6 +7,8 @@ import difflib
 from neo4j import GraphDatabase, Driver, exceptions as neo4j_exceptions
 import uuid
 from collections import defaultdict
+import concurrent.futures
+import math
 
 
 # --- LangChain/Mistral/LLM Imports ---
@@ -16,41 +18,13 @@ from langchain_core.exceptions import OutputParserException
 from langsmith import traceable
 from langsmith.run_helpers import get_current_run_tree
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Dict, Any, Optional, Set, Union
+from typing import List, Dict, Any, Optional, Set, Union, Tuple
+from langchain_core.output_parsers import PydanticOutputParser
+
 
 # ---Visualization and url parsing ---
 import plotly.express as px
 import urllib.parse
-
-#imports to be organized
-import concurrent.futures
-import math
-from typing import List, Optional, Dict, Any, Tuple
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-import concurrent.futures
-from typing import List, Optional
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-import concurrent.futures
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-import concurrent.futures
-import math
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-
-
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
@@ -89,6 +63,14 @@ SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|IN
 ### 2. STATE MANAGEMENT AND UTILITIES ###
 # ==========================================
 # --- SHARED ---
+if 'github_data' not in st.session_state:
+    st.session_state.github_data = load_github_data()
+
+if "app_state" not in st.session_state:
+    st.session_state.app_state = {
+        "connected": False, "mistral_key": "", "neo4j_creds": {}, 
+        "schema_stats": {}, "evidence_locker": [], "selected_ids": set(), "chat_history": []
+    }
 
 def init_app():
     """
@@ -189,10 +171,12 @@ def flatten_ids(container):
 def get_rel_definition(rel_name):
     """Helper to safely get a definition or a default prompt."""
     return RELATIONSHIP_DEFINITIONS.get(rel_name, "Relationship connection between entities.")
+    
 # ==========================================
 ### 2. DATA ACCESS LAYER ###
 # ==========================================
 # --- SHARED ---
+
 #CACHED RESOURCES
 @st.cache_resource
 def get_cached_driver(uri, auth):
@@ -2275,14 +2259,6 @@ GUIDELINES:
 # 8. AUTHENTICATION & SETTINGS LOGIC
 # ==========================================
 
-if 'github_data' not in st.session_state:
-    st.session_state.github_data = load_github_data()
-
-if "app_state" not in st.session_state:
-    st.session_state.app_state = {
-        "connected": False, "mistral_key": "", "neo4j_creds": {}, 
-        "schema_stats": {}, "evidence_locker": [], "selected_ids": set(), "chat_history": []
-    }
 
 @st.dialog("⚙️ Settings")
 def show_settings_dialog():
@@ -2333,11 +2309,6 @@ def show_settings_dialog():
                 st.rerun()
             else:
                 st.error(msg)
-
-
-
-
-
 
 #######################################################################
 # --- 9. GLOBAL UI COMPONENTS AND CSS(THEME, CUSTOM CSS INJECTION) ---
