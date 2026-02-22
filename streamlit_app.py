@@ -111,7 +111,7 @@ def fetch_inventory_from_db():
                 # --- A. ENTITIES (Semantic Priority) ---
                 # Matches only nodes that have at least one relationship that is NOT 'MENTIONED_IN'
                 q_entities = f"""
-                MATCH (n:`{label}`)-[r]-()
+                MATCH (n:`{label}`)-[r]->()
                 WHERE n.name IS NOT NULL 
                   AND type(r) <> 'MENTIONED_IN'
                 RETURN DISTINCT n.name as name
@@ -121,11 +121,9 @@ def fetch_inventory_from_db():
                     inventory["Entities"][label] = sorted(names_entities)
 
                 # --- B. TEXT MENTIONS (Purely Lexical) ---
-                # Matches nodes with MENTIONED_IN, but verifies they have ZERO relationships of any other type
                 q_lexical = f"""
                 MATCH (n:`{label}`)-[:MENTIONED_IN]->()
                 WHERE n.name IS NOT NULL
-                  AND size([(n)-[r]-() WHERE type(r) <> 'MENTIONED_IN' | r]) = 0
                 RETURN DISTINCT n.name as name
                 """
                 names_lexical = [r["name"] for r in session.run(q_lexical)]
