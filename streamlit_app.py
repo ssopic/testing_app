@@ -398,8 +398,12 @@ def render_explorer_workspace(selector_type, selected_items):
         
         st.markdown(legend_html, unsafe_allow_html=True)
 
-        # 1. Fetch Data
-        df = fetch_sunburst_data(selector_type, selected_items)
+        # 1. Fetch Data (Make sure this function is defined elsewhere in your script)
+        if 'fetch_sunburst_data' in globals():
+            df = fetch_sunburst_data(selector_type, selected_items)
+        else:
+             st.warning("fetch_sunburst_data is not defined in this scope. Provide a mock for now.")
+             df = pd.DataFrame()
 
         if df.empty:
             st.warning("No data found.")
@@ -440,15 +444,12 @@ def render_explorer_workspace(selector_type, selected_items):
             hover_texts = []
             
             # --- Pre-calculate Aggregates for Tooltips ---
-            # We need to manually sum counts for parent rings to display accurate "Total" numbers in the sentence.
             id_to_count = {}
             for _, row in df.iterrows():
-                # Reconstruct Path IDs used by Plotly (Root, Root/Mid, Root/Mid/Leaf)
                 root_val = row[path[0]]
                 mid_val = row[path[1]]
                 leaf_val = row[path[2]]
                 
-                # Plotly IDs are joined by '/'
                 leaf_id = f"{root_val}/{mid_val}/{leaf_val}"
                 mid_id = f"{root_val}/{mid_val}"
                 root_id = f"{root_val}"
@@ -465,7 +466,6 @@ def render_explorer_workspace(selector_type, selected_items):
                 
                 # --- A. COLOR LOGIC ---
                 if selector_type == "Connections":
-                    # Structure: Relationship (Root) -> Subject (Mid) -> Object (Leaf)
                     if depth == 0:
                         colors.append(COLOR_RELATIONSHIP)
                     elif depth == 1:
@@ -475,7 +475,6 @@ def render_explorer_workspace(selector_type, selected_items):
                     else:
                         colors.append('#333333')
                 else:
-                    # Structure: Subject (Root) -> Relationship (Mid) -> Object (Leaf)
                     if depth == 0:
                         colors.append(COLOR_ROOT)
                     elif depth == 1:
@@ -489,7 +488,6 @@ def render_explorer_workspace(selector_type, selected_items):
                 tooltip_text = ""
                 
                 if selector_type == "Connections":
-                    # [Edge, Source, Target]
                     edge = parts[0]
                     if depth == 0:
                          tooltip_text = f"Connection Type: <b>{edge}</b><br>Total Occurrences: <b>{val}</b>"
@@ -502,7 +500,6 @@ def render_explorer_workspace(selector_type, selected_items):
                         tooltip_text = f"<b>{source}</b> has {edge} <b>{val}</b> {target}s."
                 
                 else:
-                    # [Name, Edge, Target]
                     name = parts[0]
                     if depth == 0:
                         tooltip_text = f"Entity: <b>{name}</b><br>Total Connections: <b>{val}</b>"
@@ -516,7 +513,6 @@ def render_explorer_workspace(selector_type, selected_items):
                 
                 hover_texts.append(tooltip_text)
 
-            # Apply Colors AND Custom Tooltips
             fig.update_traces(
                 marker=dict(colors=colors), 
                 hovertext=hover_texts, 
@@ -524,7 +520,6 @@ def render_explorer_workspace(selector_type, selected_items):
             )
             
         except Exception as e:
-            # Fallback if parsing fails
             pass
 
         # 5. Styling & UX
@@ -536,9 +531,7 @@ def render_explorer_workspace(selector_type, selected_items):
             font=dict(color="white")       
         )
         
-        # Note: We moved hovertemplate update into the loop block above to use the custom text
         fig.update_traces(marker=dict(line=dict(color=COLOR_BORDER, width=2)))
-        
         st.plotly_chart(fig, use_container_width=True)
 
         # 6. Glossary
@@ -549,7 +542,10 @@ def render_explorer_workspace(selector_type, selected_items):
                 st.caption("No relationships visible.")
             else:
                 for edge in visible_edges:
-                    definition = get_rel_definition(edge)
+                    if 'get_rel_definition' in globals():
+                        definition = get_rel_definition(edge)
+                    else:
+                        definition = "Definition not found."
                     st.markdown(f"**{edge}**: {definition}")
 
     with c_right:
@@ -558,16 +554,13 @@ def render_explorer_workspace(selector_type, selected_items):
         # --- Conditional Filtering Logic ---
         
         if selector_type == "Text Mentions":
-            # CASE C: No Filters for Lexical
             st.caption("Standard Extraction: Entities found in Documents via 'MENTIONED_IN'.")
             st.info("No filters applicable.")
             final_filtered_df = df
 
         elif selector_type == "Connections":
-            # CASE B: Connections Mode (Filter by Nodes, not Relationships)
             st.caption("Filter by Source and Target Nodes")
             
-            # Filter 1: Source Node (Subject - Amber)
             if 'source_node_label' in df.columns:
                 raw_sources = sorted(df['source_node_label'].unique())
                 source_options = [f"🟠 {s}" for s in raw_sources]
@@ -588,7 +581,6 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 filtered_df_step1 = df
 
-            # Filter 2: Target Node (Object - Teal)
             if 'connected_node_label' in filtered_df_step1.columns:
                 raw_targets = sorted(filtered_df_step1['connected_node_label'].unique())
                 target_options = [f"🟦 {t}" for t in raw_targets]
@@ -610,10 +602,8 @@ def render_explorer_workspace(selector_type, selected_items):
                 final_filtered_df = filtered_df_step1
 
         else:
-            # CASE A: Entities Mode (Standard Logic)
             st.caption("Filter by Relationships and Target Types")
 
-            # Filter 1: Relationship (Gray)
             raw_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
             edge_options = [f"⬜ {e}" for e in raw_edges]
             
@@ -631,7 +621,6 @@ def render_explorer_workspace(selector_type, selected_items):
             else:
                 filtered_df_step1 = df[df['edge'].isin(selected_edges)]
                 
-            # Filter 2: Target Node (Object - Teal)
             if 'connected_node_label' in filtered_df_step1.columns:
                 raw_targets = sorted(filtered_df_step1['connected_node_label'].unique())
                 target_options = [f"🟦 {t}" for t in raw_targets]
@@ -668,26 +657,35 @@ def render_explorer_workspace(selector_type, selected_items):
         unique_ids = list(set(all_ids))
         string = "Documents Found: " + str(len(unique_ids)) 
         st.text(string)
-        # Uncomment to allow the preview of ID lists in the app. Useful for debugging
-        # with st.expander("Preview ID List", expanded=False):
-        #     st.write(unique_ids)
 
         st.markdown(accent_line, unsafe_allow_html=True)
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
-            # Safely assign variables if they don't exist in the current view
-            edges_to_pass = selected_edges if 'selected_edges' in locals() or 'selected_edges' in globals() else []
-            targets_to_pass = selected_targets if 'selected_targets' in locals() or 'selected_targets' in globals() else []
+            # Safely assign ALL filter variables, catching if they don't exist in the current view
+            try:
+                edges_to_pass = selected_edges
+            except (NameError, UnboundLocalError):
+                edges_to_pass = []
+                
+            try:
+                targets_to_pass = selected_targets
+            except (NameError, UnboundLocalError):
+                targets_to_pass = []
+                
+            try:
+                sources_to_pass = selected_sources
+            except (NameError, UnboundLocalError):
+                sources_to_pass = []
         
-            # Generate Cypher using the selector_type variable (which exists in your workspace code)
             cypher = generate_cart_cypher(
                 st.session_state.active_explorer_items, 
                 selector_type, 
                 edges_to_pass, 
-                targets_to_pass 
+                targets_to_pass,
+                sources_to_pass 
             )
             
-            unique_ids = set()
+            cart_unique_ids = set()
             driver = get_db_driver()
             if driver and cypher:
                 try:
@@ -697,13 +695,14 @@ def render_explorer_workspace(selector_type, selected_items):
                             if rec.get('id_list'):
                                 for item in rec['id_list']:
                                     if isinstance(item, list):
-                                        unique_ids.update(item)
+                                        # Strict string cast to match Pandas behavior
+                                        cart_unique_ids.update([str(i) for i in item])
                                     elif item is not None:
-                                        unique_ids.add(item)
+                                        cart_unique_ids.add(str(item))
                 except Exception as e:
                     st.error(f"Error executing Cypher for payload: {e}")
         
-            if not unique_ids:
+            if not cart_unique_ids:
                 st.error("No documents to add based on current filters.")
             else:
                 names = [item['name'] for item in st.session_state.active_explorer_items]
@@ -719,8 +718,8 @@ def render_explorer_workspace(selector_type, selected_items):
                 
                 payload = {
                     "query": query_desc,
-                    "answer": f"Visual discovery found {len(unique_ids)} related documents.",
-                    "ids": [str(uid) for uid in unique_ids],
+                    "answer": f"Visual discovery found {len(cart_unique_ids)} related documents.",
+                    "ids": list(cart_unique_ids),
                     "cypher": cypher 
                 }
                 
@@ -731,14 +730,14 @@ def render_explorer_workspace(selector_type, selected_items):
                     st.session_state.app_state["evidence_locker"] = []
                     
                 st.session_state.app_state["evidence_locker"].append(payload)
-                st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
+                st.toast(f"✅ Added {len(cart_unique_ids)} docs to Evidence Cart!")
                 
         # The test mode, this can be commented out for the user
         with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
             st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
             
             if st.button("Run Cypher Parity Test"):
-                # Safely assign variables for the test block as well
+                # Safely assign ALL filter variables
                 try:
                     edges_to_pass_test = selected_edges
                 except (NameError, UnboundLocalError):
@@ -748,19 +747,29 @@ def render_explorer_workspace(selector_type, selected_items):
                     targets_to_pass_test = selected_targets
                 except (NameError, UnboundLocalError):
                     targets_to_pass_test = []
+                    
+                try:
+                    sources_to_pass_test = selected_sources
+                except (NameError, UnboundLocalError):
+                    sources_to_pass_test = []
         
                 test_cypher = generate_cart_cypher(
                     st.session_state.active_explorer_items, 
                     selector_type,
                     edges_to_pass_test, 
-                    targets_to_pass_test
+                    targets_to_pass_test,
+                    sources_to_pass_test
                 )
                 
                 st.markdown("**Self-Contained Cypher Query:**")
                 st.code(test_cypher, language="cypher")
                 
                 try:
-                    driver = get_db_driver()
+                    if 'get_db_driver' in globals():
+                        driver = get_db_driver()
+                    else:
+                        driver = None
+                        
                     if not driver:
                         st.error("Could not retrieve Neo4j driver from session state. Ensure your app is connected to the database.")
                     else:
@@ -774,9 +783,10 @@ def render_explorer_workspace(selector_type, selected_items):
                                 continue
                             for item in rec['id_list']:
                                 if isinstance(item, list):
-                                    flattened_db_ids.extend(item)
+                                    # strict string cast!
+                                    flattened_db_ids.extend([str(i) for i in item])
                                 elif item is not None:
-                                    flattened_db_ids.append(item)
+                                    flattened_db_ids.append(str(item))
                                     
                         distinct_db_ids = set(flattened_db_ids)
                         
@@ -801,36 +811,6 @@ def render_explorer_workspace(selector_type, selected_items):
                     
                 except Exception as e:
                     st.error(f"Error executing test Cypher: {e}")
-                
-   
-        
-            # # current safe version, delete if everything works
-        # if st.button("Add to Evidence Cart", type="primary", use_container_width=True):
-        #     if not unique_ids:
-        #         st.error("No documents to add.")
-        #     else:
-        #         if len(names) > 1:
-        #             if selector_type == "Connections":
-        #                 name_str = f"Connections: {', '.join(names)}"
-        #             else:
-        #                 name_str = f"Entities: {', '.join(names)}"
-        #         else:
-        #             name_str = names[0]
-                    
-        #         query_desc = f"Manual Explorer: {name_str}"
-                
-        #         payload = {
-        #             "query": query_desc,
-        #             "answer": f"Visual discovery found {len(unique_ids)} related documents.",
-        #             "ids": [str(uid) for uid in unique_ids]
-        #         }
-                
-        #         if "evidence_locker" not in st.session_state.app_state:
-        #             st.session_state.app_state["evidence_locker"] = []
-                    
-        #         st.session_state.app_state["evidence_locker"].append(payload)
-        #         st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
-
 
 # Generate cypher from cart items function. This should be able to properly output the cypher we generated by modifying the output from the cypher manually
 def generate_cart_cypher(active_items, selector_type, selected_edges=None, selected_targets=None, selected_sources=None):
@@ -859,13 +839,13 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         source_filter = ""
         if len(actual_sources) > 0:
             formatted_sources = json.dumps(actual_sources)
-            # FIX: Match Pandas exact grouping by using labels(n)[0] instead of `any()`
+            # Match Pandas exact grouping by using labels(n)[0] instead of `any()`
             source_filter = f"\n      AND labels(n)[0] IN {formatted_sources}"
             
         target_filter = ""
         if len(selected_targets) > 0:
             formatted_targets = json.dumps(selected_targets)
-            # FIX: Match Pandas exact grouping by using labels(m)[0] instead of `any()`
+            # Match Pandas exact grouping by using labels(m)[0] instead of `any()`
             target_filter = f"\n      AND labels(m)[0] IN {formatted_targets}"
         
         cypher = f"""
@@ -914,7 +894,6 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
         return cypher
-
     
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
