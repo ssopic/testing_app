@@ -852,24 +852,27 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         rel_types = [item['name'] for item in active_items]
         formatted_rels = json.dumps(rel_types)
         
-        # FIX: Added filtering logic for Connections view
+        # Added filtering logic to check both labels and specific node names (n.name / m.name)
         source_filter = ""
         if len(selected_sources) > 0:
             formatted_sources = json.dumps(selected_sources)
-            source_filter = f"\n      AND any(label IN labels(n) WHERE label IN {formatted_sources})"
+            source_filter = f"\n      AND (any(label IN labels(n) WHERE label IN {formatted_sources}) OR n.name IN {formatted_sources})"
             
         target_filter = ""
         if len(selected_targets) > 0:
             formatted_targets = json.dumps(selected_targets)
-            target_filter = f"\n      AND any(label IN labels(m) WHERE label IN {formatted_targets})"
+            target_filter = f"\n      AND (any(label IN labels(m) WHERE label IN {formatted_targets}) OR m.name IN {formatted_targets})"
         
+        # FIX: Changed (n)-[r]-(m) to (n)-[r]->(m) to enforce directional analysis and prevent filter bypasses
         cypher = f"""
-    MATCH (n)-[r]-(m)
+    MATCH (n)-[r]->(m)
     WHERE type(r) IN {formatted_rels}{source_filter}{target_filter}
     RETURN 
         labels(n)[0] AS source_label, 
+        n.name AS source_name,
         type(r) AS edge, 
         labels(m)[0] AS target_label,
+        m.name AS target_name,
         collect(coalesce(r.source_pks, m.doc_id, n.doc_id)) AS id_list
     """
         return cypher
@@ -897,15 +900,18 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         target_filter = ""
         if len(selected_targets) > 0:
             formatted_targets = json.dumps(selected_targets)
-            target_filter = f"\n      AND any(label IN labels(m) WHERE label IN {formatted_targets})"
+            # Ensure we filter by m.name OR m's label in case the UI selection uses specific targets
+            target_filter = f"\n      AND (any(label IN labels(m) WHERE label IN {formatted_targets}) OR m.name IN {formatted_targets})"
 
+        # FIX: Changed (n)-[r]-(m) to (n)-[r]->(m) to enforce directional analysis and prevent filter bypasses
         cypher = f"""
-    MATCH (n)-[r]-(m)
+    MATCH (n)-[r]->(m)
     WHERE ({source_where}){edge_filter}{target_filter}
     RETURN 
-        n.name AS source, 
+        n.name AS source_name, 
         type(r) AS edge, 
         labels(m) AS target_labels,
+        m.name AS target_name,
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
         return cypher
