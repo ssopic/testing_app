@@ -691,7 +691,7 @@ def render_explorer_workspace(selector_type, selected_items):
             st.success("Evidence query successfully added to cart!")
         st.divider()
         with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
-        st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
+            st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
             
             if st.button("Run Cypher Parity Test"):
                 test_cypher = generate_cart_cypher(
