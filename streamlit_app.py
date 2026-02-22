@@ -816,6 +816,8 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
         labels(m) AS target_labels,
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
+    return cypher, params
+
     
 # ==========================================
 # 4. MAIN SCREEN CONTROLLER
