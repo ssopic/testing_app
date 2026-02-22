@@ -4,24 +4,53 @@ import json
 import re
 import pandas as pd
 import difflib
-from typing import List, Dict, Any, Optional, Set, Union
 from neo4j import GraphDatabase, Driver, exceptions as neo4j_exceptions
 import uuid
+from collections import defaultdict
 
-# --- LangChain/Mistral Imports ---
+
+# --- LangChain/Mistral/LLM Imports ---
 from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.exceptions import OutputParserException
-from pydantic import BaseModel, Field, ValidationError
 from langsmith import traceable
 from langsmith.run_helpers import get_current_run_tree
+from pydantic import BaseModel, Field, ValidationError
+from typing import List, Dict, Any, Optional, Set, Union
 
 # ---Visualization and url parsing ---
 import plotly.express as px
 import urllib.parse
 
-# testing some items with defaultdict
-from collections import defaultdict
+#imports to be organized
+import concurrent.futures
+import math
+from typing import List, Optional, Dict, Any, Tuple
+from pydantic import BaseModel, Field
+from langchain_mistralai import ChatMistralAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+import concurrent.futures
+from typing import List, Optional
+from pydantic import BaseModel, Field
+from langchain_mistralai import ChatMistralAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+import concurrent.futures
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from langchain_mistralai import ChatMistralAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+import concurrent.futures
+import math
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from langchain_mistralai import ChatMistralAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+
+
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
@@ -45,7 +74,21 @@ def setup_langsmith():
         # Ensure your API Key was actually created in the EU region!
         os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 
-# -------------------------------------------------------------
+# ==========================================
+### 1. CONSTANTS ###
+# ==========================================
+
+# --- PAGE CONFIGURATION ---
+st.set_page_config(page_title="AI Graph Analyst", layout="wide")
+
+# --- OTHER CONSTANTS ---
+LLM_MODEL = "mistral-medium"
+SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
+
+# ==========================================
+### 2. STATE MANAGEMENT AND UTILITIES ###
+# ==========================================
+# --- SHARED ---
 
 def init_app():
     """
@@ -71,12 +114,214 @@ def init_app():
             st.toast(f"⚠️ Auto-login failed: {msg}", icon="⚠️")
     
     st.session_state.has_tried_login = True
-# ==========================================
-### NEW DATABOOK ###
-# ==========================================
-# 1. FALLBACK DB FUNCTIONS
-# ==========================================
+    
+def get_config(key, default=""):
+    """Helper to get credentials from Secrets (Cloud) or Env (Local)."""
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.environ.get(key, default)
+    
+def set_page(page_name):
+    """Helper to update the current page in session state."""
+    st.session_state.current_page = page_name
 
+def attempt_connection(uri, username, password, api_key):
+    """
+    Attempts to connect to Neo4j and validate the Mistral Key.
+    Returns (Success: bool, Message: str)
+    """
+    try:
+        # Validate Neo4j connection using your existing function
+        stats = fetch_schema_statistics(uri, (username, password))
+        
+        if stats["status"] == "SUCCESS":
+            # Update Session State on success
+            st.session_state.app_state.update({
+                "connected": True,
+                "mistral_key": api_key,
+                "neo4j_creds": {
+                    "uri": uri, 
+                    "user": username, 
+                    "pass": password, 
+                    "auth": (username, password)
+                },
+                "schema_stats": stats
+            })
+            return True, "✅ Successfully connected to Neo4j & Mistral!"
+        else:
+            return False, f"Neo4j Error: {stats.get('error')}"
+
+    except Exception as e:
+        return False, f"Connection Failed: {str(e)}"
+
+def extract_provenance_from_result(result: Union[Dict, List]) -> List[str]:
+    """Scans JSON recursively for keys indicating ID storage (provenance, pks, doc_id)."""
+    ids = []
+    # Broader set of keywords to catch un-aliased returns like 'r.source_pks'
+    target_keys = ["provenance", "source_pks", "doc_id", "id_list", "pk"]
+    
+    def recurse(data):
+        if isinstance(data, dict):
+            for k, v in data.items():
+                # Check if ANY target key matches the result key (case-insensitive)
+                if any(t in k.lower() for t in target_keys):
+                    if isinstance(v, list): ids.extend([str(i) for i in v])
+                    else: ids.append(str(v))
+                else: 
+                    recurse(v)
+        elif isinstance(data, list):
+            for item in data: recurse(item)
+            
+    recurse(result)
+    return list(set(ids))
+
+# --- DESKTOP ONLY ---
+def flatten_ids(container):
+    """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
+    ids = set()
+    if isinstance(container, (list, tuple, set)):
+        for item in container:
+            ids.update(flatten_ids(item))
+    elif pd.notna(container):
+        ids.add(container)
+    return ids
+
+def get_rel_definition(rel_name):
+    """Helper to safely get a definition or a default prompt."""
+    return RELATIONSHIP_DEFINITIONS.get(rel_name, "Relationship connection between entities.")
+# ==========================================
+### 2. DATA ACCESS LAYER ###
+# ==========================================
+# --- SHARED ---
+#CACHED RESOURCES
+@st.cache_resource
+def get_cached_driver(uri, auth):
+    """Maintains a persistent Neo4j connection pool."""
+    cleaned_uri = uri.strip()
+    if not any(cleaned_uri.startswith(p) for p in ["neo4j+s://", "bolt://", "neo4j://"]):
+        cleaned_uri = f"neo4j+s://{cleaned_uri}"
+    driver = GraphDatabase.driver(cleaned_uri, auth=auth)
+    driver.verify_connectivity()
+    return driver
+
+@st.cache_resource
+def get_cached_llm(api_key):
+    """Maintains a persistent LLM client."""
+    return ChatMistralAI(
+        model=LLM_MODEL,
+        api_key=api_key,
+        temperature=0.0
+    )
+
+@st.cache_data
+def load_github_data():
+    """
+    This is the actual dataframe containing the open data from the Oversight commitee
+    Loads external context data efficiently and performs deduplication logic.
+    Also synthetically creates 'Bates_Identity' and ensures 'Text Link' exists.
+    """
+    url = "https://raw.githubusercontent.com/ssopic/some_data/main/sum_data.csv"
+    try:
+        df = pd.read_csv(url)
+        
+        # 1. Basic Cleaning
+        # Convert PK to string, remove potential '.0' from floats, and strip whitespace
+        df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        
+        # 2. Bates & Link Column Handling
+        # The source data might not have these columns, so we initialize them if missing.
+        for col in ['Bates Begin', 'Bates End', 'Text Link']:
+            if col not in df.columns:
+                df[col] = "" # Initialize if missing
+            # Clean: to string, remove float decimals, strip whitespace
+            df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            
+        # 3. Create Bates Identity (User Requirement)
+        # Since 'Bates Identity' does not exist in source, we construct it: "Begin End"
+        df['Bates_Identity'] = df['Bates Begin'] + " " + df['Bates End']
+        # Fallback: If result is just whitespace (missing bates), use "Doc_PK" to ensure UI has a label
+        df['Bates_Identity'] = df['Bates_Identity'].apply(lambda x: x if x.strip() else None)
+        df['Bates_Identity'] = df['Bates_Identity'].fillna("Doc_" + df['PK'])
+        
+        # 4. Sequence Logic Processing
+        if 'chain_sequence_order' in df.columns:
+            # Ensure sequence is numeric for correct sorting
+            df['chain_sequence_order'] = pd.to_numeric(df['chain_sequence_order'], errors='coerce')
+            
+            # Sort by sequence descending (Highest first)
+            df = df.sort_values(by="chain_sequence_order", ascending=False)
+            
+            # Drop duplicates on PK, keeping the 'first' (highest sequence)
+            df = df.drop_duplicates(subset=["PK"], keep="first")
+            
+        return df
+    except Exception as e:
+        # Fallback empty dataframe structure with all required columns
+        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body", "Text Link", "chain_sequence_order", "Bates_Identity"])
+
+# USED BY THE GRAPH RAG PIPELINE
+def fetch_schema_statistics(uri: str, auth: tuple) -> Dict[str, Any]:
+    """
+    Connects to DB and creates comprehensive schema stats required for context management of the graph rag pipeline.
+    """
+    stats = {
+        "status": "INIT", "NodeCounts": {}, "RelationshipVerbs": {},
+        "NodeLabels": [], "RelationshipTypes": [], 
+        "NodeProperties": {}, "RelationshipProperties": {}
+    }
+    driver = None
+    try:
+        # We don't use the cached driver here to allow for connection testing with new creds
+        cleaned_uri = uri.strip()
+        if not any(cleaned_uri.startswith(p) for p in ["neo4j+s://", "bolt://", "neo4j://"]):
+            cleaned_uri = f"neo4j+s://{cleaned_uri}"
+            
+        driver = GraphDatabase.driver(cleaned_uri, auth=auth)
+        driver.verify_connectivity()
+
+        with driver.session() as session:
+            stats["NodeLabels"] = session.run("CALL db.labels()").value()
+            stats["RelationshipTypes"] = session.run("CALL db.relationshipTypes()").value()
+
+            for label in stats["NodeLabels"]:
+                count = session.run(f"MATCH (n:`{label}`) RETURN count(n) as c").single()["c"]
+                stats["NodeCounts"][label] = count
+
+            for r_type in stats["RelationshipTypes"]:
+                try:
+                    verb_q = f"MATCH ()-[r:`{r_type}`]->() WHERE r.raw_verbs IS NOT NULL UNWIND r.raw_verbs as v RETURN DISTINCT v "
+                    verbs = [record["v"] for record in session.run(verb_q)]
+                    stats["RelationshipVerbs"][r_type] = verbs
+                except: stats["RelationshipVerbs"][r_type] = []
+
+            # Optimized Property Fetching
+            node_props_q = "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName RETURN nodeType, collect(propertyName) as props"
+            for record in session.run(node_props_q):
+                raw_type = record["nodeType"]
+                if raw_type.startswith(":"):
+                    for label in raw_type[1:].split(":"):
+                        current_props = set(stats["NodeProperties"].get(label, []))
+                        current_props.update(record["props"])
+                        stats["NodeProperties"][label] = list(current_props)
+
+            rel_props_q = "CALL db.schema.relTypeProperties() YIELD relType, propertyName RETURN relType, collect(propertyName) as props"
+            for record in session.run(rel_props_q):
+                raw_type = record["relType"]
+                if raw_type.startswith(":"):
+                    stats["RelationshipProperties"][raw_type[1:]] = record["props"]
+
+            stats["status"] = "SUCCESS"
+    except Exception as e:
+        stats["status"] = "ERROR"
+        stats["error"] = str(e)
+    finally:
+        if driver: driver.close()
+    return stats
+
+# --- DESKTOP ONLY ---
+# These contain exclusively the fetchers for the manual data extraction screen(with the sunbursts)
+
+#The get_db_driver function actually needs to be refactored out but that is in a future sprint
 def get_db_driver():
     """Retrieves the cached driver from the main app state."""
     if "app_state" in st.session_state and "neo4j_creds" in st.session_state.app_state:
@@ -84,12 +329,27 @@ def get_db_driver():
         uri = creds.get("uri")
         auth = creds.get("auth")
         if uri and auth:
-            # We assume the main app has already validated this driver
-            # Ideally, we reuse the exact object, but creating a lightweight driver here is safe
-            # if we trust the credentials.
             return GraphDatabase.driver(uri, auth=auth)
     return None
 
+#FETCH INVENTORY CURRENTLY DEFAULTS TO FETCH INVENTORY FROM DB BECAUSE THE EXACT JSONS ARE STILL BEING WORKED ON. THEY WILL BE COMPLETED ONLY AFTER THE INITIAL USER SCREENING
+# THE IDEA IS TO PREPOPULATE THE QUERIES TO LESSEN THE STRAIN ON THE DATABASE
+@st.cache_data(ttl=3600)
+def fetch_inventory() -> dict:
+    """
+    Hybrid Fetcher:
+    1. Try GitHub (Fast, Static)
+    2. Fallback to DB (Slower, Fresh)
+    """
+    # 1. Try GitHub
+    url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/inventory.json"
+    try:
+        response = pd.read_json(url)
+        return response.to_dict()
+    except Exception:
+        # 2. Fallback to DB
+        return fetch_inventory_from_db()
+        
 def fetch_inventory_from_db():
     """
     Refactored Fallback: Generates the inventory dict with strict segregation.
@@ -211,27 +471,9 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
         return pd.DataFrame()
     finally:
         driver.close()
-        
-# ==========================================
-# 2. HYBRID FETCHERS (GITHUB -> DB)
-# ==========================================
 
-@st.cache_data(ttl=3600)
-def fetch_inventory() -> dict:
-    """
-    Hybrid Fetcher:
-    1. Try GitHub (Fast, Static)
-    2. Fallback to DB (Slower, Fresh)
-    """
-    # 1. Try GitHub
-    url = "https://raw.githubusercontent.com/ssopic/testing_app/main/sunburst_jsons/inventory.json"
-    try:
-        response = pd.read_json(url)
-        return response.to_dict()
-    except Exception:
-        # 2. Fallback to DB
-        return fetch_inventory_from_db()
 
+# The same as with the fetch_inventory function. The actual jsons are not created yet due to often changes in the data. Will be completed after initial user analysis.
 @st.cache_data(ttl=3600)
 def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
     """
@@ -280,7 +522,6 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
             df_db = fetch_sunburst_from_db(selector_type, label, names)
             if not df_db.empty:
                 dfs.append(df_db)
-
     # 3. Combine results
     if not dfs:
         return pd.DataFrame()
@@ -288,20 +529,822 @@ def fetch_sunburst_data(selector_type: str, items: list[dict]) -> pd.DataFrame:
     return pd.concat(dfs, ignore_index=True)
 
 # ==========================================
-# 3. Processing entities 
+### 4. GRAPH RAG PIPELINE  ###
 # ==========================================
-def flatten_ids(container):
-    """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
-    ids = set()
-    if isinstance(container, (list, tuple, set)):
-        for item in container:
-            ids.update(flatten_ids(item))
-    elif pd.notna(container):
-        ids.add(container)
-    return ids
+
+# --- PYDANTIC MODELS ---
+class StructuredBlueprint(BaseModel):
+    intent: str = Field(description="The primary action: FindEntity, FindPath, MultiHopAnalysis, etc.")
+    target_entity_nl: str = Field(description="Natural language term for the primary entity.")
+    source_entity_nl: str = Field(description="Natural language term for the starting entity or context.")
+    complexity: str = Field(description="Simple, MultiHop, or Aggregation.")
+    proposed_relationships: List[str] = Field(default_factory=list, description="List of sequential relationships or verbs. EXTRACT VERBATIM. Do not normalize. If user says 'bribed', output 'bribed'.")
+    filter_on_verbs: List[str] = Field(default_factory=list, description="Specific raw verbs to filter by.")
+    constraints: List[str] = Field(description="Temporal or attribute constraints.")
+    properties_to_return: List[str] = Field(description="Properties the user wants to see.")
+
+class GroundingOutput(BaseModel):
+    thought_process: str = Field(description="Step-by-step reasoning.")
+    source_node_label: str = Field(description="Primary source node label.")
+    target_node_label: str = Field(description="Primary target node label.")
+    relationship_paths: List[str] = Field(description="Ordered list of specific relationship types.")
+    target_node_variable: str = Field(description="Cypher var for target.")
+    source_node_variable: str = Field(description="Cypher var for source.")
+    cypher_constraint_fragment: str = Field(description="WHERE clause fragment.")
+    cypher_return_fragment: str = Field(description="RETURN statement fragment.")
+
+class GroundedComponent(BaseModel):
+    source_node_label: str
+    target_node_label: str
+    relationship_paths: List[str]
+    cypher_constraint_clause: str
+    return_variables: str
+    target_node_variable: str
+    source_node_variable: str
+    filter_on_verbs: List[str] = Field(default_factory=list)
+
+class CorrectionReport(BaseModel):
+    error_source_agent: str
+    correction_needed: str
+    fixed_cypher: Optional[str] = Field(None)
+    new_blueprint_fragment: Optional[Dict[str, Any]] = Field(None)
+
+class PrunedSchema(BaseModel):
+    NodeLabels: List[str]
+    RelationshipTypes: List[str]
+    NodeProperties: Dict[str, List[str]]
+    RelationshipProperties: Dict[str, List[str]]
+    # NEW: Friction Reducers for when the user specifically asks for verbs and labels.
+    verb_mapping: Dict[str, str] = Field(
+        default_factory=dict, 
+        description="Map from Blueprint Verb (key) to Schema Relationship Type (value). Example: {'paid': 'FINANCIAL_TRANSACTION'}"
+    )
+    entity_mapping: Dict[str, str] = Field(
+        default_factory=dict, 
+        description="Map from Blueprint Keyword (key) to Schema Node Label (value). Example: {'island': 'LOCATION'}"
+    )
+
+class SynthesisOutput(BaseModel):
+    final_answer: str
+    source_document_ids: List[str] = Field(default_factory=list)
+
+class CypherWrapper(BaseModel):
+    query: str
+
+# --- GRAPH-RAG PIPELINE ---
+class GraphRAGPipeline:
+    def __init__(self, driver: Driver, llm: ChatMistralAI, schema_stats: Dict[str, Any]):
+        self.driver = driver
+        self.llm = llm
+        self.schema_stats = schema_stats or {}
+
+    def _get_full_schema(self) -> Dict[str, Any]:
+        return {
+            "NodeLabels": self.schema_stats.get("NodeLabels", []),
+            "RelationshipTypes": self.schema_stats.get("RelationshipTypes", []),
+            "NodeProperties": self.schema_stats.get("NodeProperties", {}),
+            "RelationshipProperties": self.schema_stats.get("RelationshipProperties", {})
+        }
+
+    def _check_query_safety(self, cypher: str) -> bool:
+        return not bool(SAFETY_REGEX.search(cypher))
+
+    @traceable 
+    def _run_agent(self, agent_name: str, output_model: BaseModel, context: Dict) -> Any:
+        
+        # ---  Dynamic Renaming Logic ---
+        rt = get_current_run_tree()
+        if rt:
+            rt.name = agent_name
+        # ---------------------------------
+
+        sys_prompt = SYSTEM_PROMPTS.get(agent_name, "")
+        
+        formatted_context = {}
+        for k, v in context.items():
+            if isinstance(v, BaseModel): 
+                formatted_context[k] = v.model_dump_json(indent=2)
+            elif isinstance(v, (dict, list)): 
+                formatted_context[k] = json.dumps(v, indent=2)
+            else: 
+                formatted_context[k] = str(v)
+
+        msgs = [("system", sys_prompt)]
+        
+        # Prompt Mapping
+        if agent_name == "Intent Planner": 
+            msgs.append(("human", "QUERY: {user_query}"))
+        elif agent_name == "Schema Selector": 
+            msgs.append(("human", "BLUEPRINT: {blueprint}\nFULL_SCHEMA: {full_schema}"))
+        elif agent_name == "Grounding Agent": 
+            msgs.append(("human", "BLUEPRINT: {blueprint}\nSCHEMA: {schema}\nQUERY: {user_query}"))
+        elif agent_name == "Cypher Generator": 
+            msgs.append(("human", "GROUNDED_COMPONENT: {blueprint}"))
+        elif agent_name == "Query Debugger": 
+            msgs.append(("human", "ERROR: {error}\nQUERY: {failed_query}\nBLUEPRINT: {blueprint}\nWARNINGS: {warnings}"))
+        elif agent_name == "Synthesizer": 
+            msgs.append(("human", "QUERY: {user_query}\nCYPHER: {final_cypher}\nRESULTS: {db_result}"))
+        
+        prompt = ChatPromptTemplate.from_messages(msgs)
+        return (prompt | self.llm.with_structured_output(output_model)).invoke(formatted_context)
+        
+    @traceable(name="GraphRAG Main Pipeline")
+    def run(self, user_query: str, session_id: str = "default") -> Dict[str, Any]:
+        rt = get_current_run_tree()
+        if rt:
+            rt.add_metadata({"session_id": session_id})
+        pipeline_object = {"user_query": user_query, "status": "INIT", "execution_history": [], "proof_ids": []}
+        
+        try:
+            # 1. Intent
+            pipeline_object["status"] = "PLANNING"
+            blueprint = self._run_agent("Intent Planner", StructuredBlueprint, {"user_query": user_query})
+
+            pipeline_object["intent_data"] = blueprint.model_dump() # Save for debugging
+            
+            # 2. Schema
+            full_schema = self._get_full_schema()
+            pruned_schema = self._run_agent("Schema Selector", PrunedSchema, {"blueprint": blueprint, "full_schema": full_schema})
+            
+            # 3. Grounding
+            grounding = self._run_agent("Grounding Agent", GroundingOutput, {"blueprint": blueprint, "schema": pruned_schema.model_dump(), "user_query": user_query})
+            pipeline_object["grounding_data"] = grounding.model_dump() # Save for debugging
+            
+            grounded_comp = GroundedComponent(
+                source_node_label=grounding.source_node_label,
+                target_node_label=grounding.target_node_label,
+                relationship_paths=grounding.relationship_paths,
+                cypher_constraint_clause=grounding.cypher_constraint_fragment,
+                return_variables=grounding.cypher_return_fragment,
+                target_node_variable=grounding.target_node_variable,
+                source_node_variable=grounding.source_node_variable,
+                filter_on_verbs=blueprint.filter_on_verbs
+            )
+
+            # 4. Generation
+            cypher_resp = self._run_agent("Cypher Generator", CypherWrapper, {"blueprint": grounded_comp})
+            raw_cypher = cypher_resp.query.replace("\n", " ")
+            if not self._check_query_safety(raw_cypher): raise ValueError("Unsafe Cypher detected.")
+            pipeline_object["cypher_query"] = raw_cypher
+
+            # 5. Execution & Retry Loop
+            pipeline_object["status"] = "EXECUTING"
+            results = []
+            
+            for attempt in range(1, 4):
+                attempt_log = {"attempt": attempt, "cypher": raw_cypher, "status": "PENDING", "warnings": []}
+                try:
+                    with self.driver.session() as session:
+                        res_obj = session.run(raw_cypher)
+                        records = [r.data() for r in res_obj]
+                        
+                        # Capture notifications/warnings if available
+                        summary = res_obj.consume()
+                        if summary.notifications:
+                             # FIX: Robust warning handling (Dict vs Object)
+                             warnings = []
+                             for n in summary.notifications:
+                                 # Handle Neo4j driver returning dicts instead of objects
+                                 if isinstance(n, dict):
+                                     code = n.get("code", "UNKNOWN")
+                                     msg = n.get("description", "No description")
+                                 else:
+                                     code = getattr(n, "code", "UNKNOWN")
+                                     msg = getattr(n, "description", "No description")
+                                 warnings.append({"code": code, "message": msg})
+                             attempt_log["warnings"] = warnings
+                        
+                        results = records
+                        attempt_log["status"] = "SUCCESS"
+                        pipeline_object["execution_history"].append(attempt_log)
+                        pipeline_object["cypher_query"] = raw_cypher # Update in case of fix
+                        break
+                except Exception as e:
+                    attempt_log["status"] = "FAILED"
+                    attempt_log["error"] = str(e)
+                    pipeline_object["execution_history"].append(attempt_log)
+                    
+                    if attempt < 3:
+                        correction = self._run_agent("Query Debugger", CorrectionReport, {
+                            "error": str(e), "failed_query": raw_cypher, 
+                            "blueprint": grounded_comp, "schema": full_schema, 
+                            "warnings": attempt_log["warnings"]
+                        })
+                        if correction.fixed_cypher: raw_cypher = correction.fixed_cypher.replace("\n", " ")
+                        else: break
+                    else: raise e
+
+            # 6. Synthesis
+            pipeline_object["raw_results"] = results
+            pipeline_object["proof_ids"] = extract_provenance_from_result(results) # Internal utility
+            
+            if not results:
+                pipeline_object["final_answer"] = "No information found."
+            else:
+                synth = self._run_agent("Synthesizer", SynthesisOutput, {
+                    "user_query": user_query, "final_cypher": raw_cypher, "db_result": results[:50]
+                })
+                pipeline_object["final_answer"] = synth.final_answer
+            
+            pipeline_object["status"] = "SUCCESS"
+
+        except Exception as e:
+            pipeline_object["status"] = "ERROR"
+            pipeline_object["error"] = str(e)
+            
+        return pipeline_object
+
+# ==========================================
+### 5. MAP REDUCE ENGINE  ###
+# ==========================================
+
+# --- PYDANTIC MODELS ---
+
+class ExtractionGoal(BaseModel):
+    """Generated by the Architect to guide the Map Agents."""
+    goal_description: str = Field(description="Specific instructions on what information to extract.")
+    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
+
+class DocumentFact(BaseModel):
+    """The output of a Map Agent reading a single document."""
+    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
+    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
+    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
+    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
+
+class BatchExtractionResult(BaseModel):
+    """Wrapper to handle multiple document extractions in one pass."""
+    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
+
+# --- ENGINE CLASS CONFIGURATION ---
+TOKEN_THRESHOLD_CHARS = 40000 
+MAX_WORKERS = 4 
+# Batch Size Strategy:
+# 15,000 chars is roughly 3,500 - 4,000 tokens. 
+BATCH_SIZE_CHARS = 15000 
+# New: Overlap for splitting large docs (Split Brain Fix)
+OVERLAP_CHARS = 1000 
+
+# --- THE ENGINE CLASS ---
+class MapReduceEngine:
+    # --- PROMPT TEMPLATES ---
+    ARCHITECT_PROMPT_TEMPLATE = """You are an Expert Legal Analyst. 
+    User Query: {query}
+    
+    Create a specific 'Extraction Goal' for junior analysts.
+    If the user asks about specific details (dates, names, colors), explicitly include them in keywords.
+    
+    Your response must be a single valid JSON object strictly matching the schema.
+    
+    {format_instructions}
+    """
+
+    MAP_PROMPT_TEMPLATE = """You are a Fact Extraction Agent analyzing a batch of documents.
+    
+    GOAL: {goal_description}
+    KEYWORDS: {keywords}
+    
+    Analyze the following documents. For EACH document, create an extraction result.
+    Always use the exact DOCUMENT ID provided in the header.
+    
+    BATCH CONTENT:
+    {content}
+    
+    Output strictly valid JSON.
+    
+    {format_instructions}
+    """
+
+    REDUCE_PROMPT_TEMPLATE = """You are a Lead Investigator.
+    Answer the user's question using ONLY the provided facts.
+    Cite your sources using the [Source ID] format.
+    
+    User Question: {query}
+    
+    Extracted Facts:
+    {context}
+    """
+
+    def __init__(self, api_key: str, model_small: str = "mistral-small", model_large: str = "mistral-medium"):
+        self.api_key = api_key
+        self.llm_map = ChatMistralAI(model=model_small, api_key=api_key, temperature=0.0)
+        self.llm_reduce = ChatMistralAI(model=model_large, api_key=api_key, temperature=0.0)
+        self.execution_logs: List[Dict[str, Any]] = []
+
+    def get_schemas(self) -> Dict[str, Any]:
+        """Returns the JSON schemas for the Pydantic models used."""
+        return {
+            "ExtractionGoal": ExtractionGoal.model_json_schema(),
+            "DocumentFact": DocumentFact.model_json_schema(),
+            "BatchExtractionResult": BatchExtractionResult.model_json_schema()
+        }
+
+    def _log_step(self, step_name: str, prompt_content: str, result_summary: str = ""):
+        """Internal helper to log execution details."""
+        self.execution_logs.append({
+            "step": step_name,
+            "prompt": prompt_content,
+            "result": result_summary
+        })
+
+    def estimate_strategy(self, docs_content: List[str]) -> str:
+        total_chars = sum(len(d) for d in docs_content if d)
+        if total_chars < TOKEN_THRESHOLD_CHARS:
+            return "DIRECT"
+        return "MAP_REDUCE"
+
+    def architect_query(self, user_query: str) -> ExtractionGoal:
+        parser = PydanticOutputParser(pydantic_object=ExtractionGoal)
+        prompt = ChatPromptTemplate.from_template(self.ARCHITECT_PROMPT_TEMPLATE)
+        
+        format_instructions = parser.get_format_instructions()
+        formatted_prompt = prompt.format(query=user_query, format_instructions=format_instructions)
+        self._log_step("Architect", formatted_prompt)
+
+        chain = prompt | self.llm_reduce | parser
+        try:
+            return chain.invoke({"query": user_query, "format_instructions": format_instructions})
+        except Exception as e:
+            print(f"Architect JSON parsing failed: {e}. Using fallback.")
+            return ExtractionGoal(
+                goal_description=f"Extract all information relevant to the user query: {user_query}",
+                keywords=[]
+            )
+
+    def _create_batches(self, docs: List[dict]) -> Tuple[List[List[dict]], Dict[str, int]]:
+        """
+        Smart Batching with Proactive Splitting.
+        Returns:
+            Tuple[List[Batches], Dict[Stats]]
+        """
+        batches = []
+        current_batch = []
+        current_chars = 0
+        
+        # Stats counters
+        stats = {
+            "split_doc_count": 0,    # How many ORIGINAL docs were too big
+            "total_split_chunks": 0  # How many chunks they created
+        }
+        
+        for doc in docs:
+            doc_body = doc.get('Body', '')
+            doc_len = len(doc_body)
+            doc_id = doc.get('Bates_Identity', 'Unknown')
+
+            # Proactive Splitting Logic
+            if doc_len > BATCH_SIZE_CHARS:
+                stats["split_doc_count"] += 1
+                
+                # 1. Flush current batch if it exists
+                if current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_chars = 0
+                
+                # 2. Chunking loop
+                start = 0
+                chunks_created_for_this_doc = 0
+                while start < doc_len:
+                    end = min(start + BATCH_SIZE_CHARS, doc_len)
+                    chunk_text = doc_body[start:end]
+                    
+                    chunk_doc = {
+                        "Bates_Identity": doc_id, 
+                        "Body": chunk_text
+                    }
+                    batches.append([chunk_doc]) # Giant docs get their own batch
+                    chunks_created_for_this_doc += 1
+                    
+                    if end == doc_len:
+                        break
+                    
+                    start = end - OVERLAP_CHARS
+                
+                stats["total_split_chunks"] += chunks_created_for_this_doc
+                    
+            # Standard Batching Logic
+            elif current_batch and (current_chars + doc_len > BATCH_SIZE_CHARS):
+                batches.append(current_batch)
+                current_batch = [doc]
+                current_chars = doc_len
+            else:
+                current_batch.append(doc)
+                current_chars += doc_len
+        
+        if current_batch:
+            batches.append(current_batch)
+            
+        return batches, stats
+
+    def map_document_batch(self, batch_docs: List[dict], goal: ExtractionGoal) -> List[DocumentFact]:
+        parser = PydanticOutputParser(pydantic_object=BatchExtractionResult)
+        
+        batch_context = ""
+        doc_ids_in_batch = []
+        for d in batch_docs:
+            d_id = d.get('Bates_Identity', 'Unknown')
+            d_body = d.get('Body', '') 
+            doc_ids_in_batch.append(d_id)
+            batch_context += f"--- DOCUMENT ID: {d_id} ---\n{d_body}\n\n"
+
+        prompt = ChatPromptTemplate.from_template(self.MAP_PROMPT_TEMPLATE)
+        
+        format_instructions = parser.get_format_instructions()
+        formatted_prompt = prompt.format(
+            goal_description=goal.goal_description,
+            keywords=", ".join(goal.keywords),
+            content=batch_context,
+            format_instructions=format_instructions
+        )
+        
+        log_view = formatted_prompt.replace(batch_context, f"[BATCH CONTENT HIDDEN ({len(batch_context)} chars)]")
+        self._log_step("Map Agent (Batch)", log_view)
+
+        chain = prompt | self.llm_map | parser
+        try:
+            result = chain.invoke({
+                "goal_description": goal.goal_description,
+                "keywords": ", ".join(goal.keywords),
+                "content": batch_context,
+                "format_instructions": format_instructions
+            })
+            
+            valid_results = []
+            for item in result.results:
+                valid_results.append(item)
+                
+            return valid_results
+            
+        except Exception as e:
+            return [DocumentFact(doc_id=d, has_relevant_info=False, relevant_quotes=[], extracted_summary=f"Error: {str(e)}") for d in doc_ids_in_batch]
+
+    def reduce_facts(self, facts: List[DocumentFact], user_query: str) -> str:
+        """The Reduce Worker: Synthesizes final answer."""
+        relevant_facts = [f for f in facts if f.has_relevant_info]
+        
+        if not relevant_facts:
+            return "I analyzed the documents but found no relevant specific information matching your criteria."
+
+        # Citation Clutter Fix (Aggregation)
+        merged_facts: Dict[str, Dict] = {} 
+        
+        for f in relevant_facts:
+            if f.doc_id not in merged_facts:
+                merged_facts[f.doc_id] = {"summary": [], "quotes": []}
+            
+            if f.extracted_summary:
+                merged_facts[f.doc_id]["summary"].append(f.extracted_summary)
+            if f.relevant_quotes:
+                merged_facts[f.doc_id]["quotes"].extend(f.relevant_quotes)
+        
+        context_str = ""
+        for doc_id, data in merged_facts.items():
+            combined_summary = " ".join(data["summary"])
+            combined_quotes = data["quotes"]
+            context_str += f"Source ({doc_id}): {combined_summary}\nQuotes: {combined_quotes}\n---\n"
+            
+        prompt = ChatPromptTemplate.from_template(self.REDUCE_PROMPT_TEMPLATE)
+        formatted_prompt = prompt.format(query=user_query, context=context_str)
+        self._log_step("Reduce/Synthesis", formatted_prompt)
+
+        chain = prompt | self.llm_reduce
+        return chain.invoke({"query": user_query, "context": context_str}).content
+
+    def run_parallel_map(self, docs: List[dict], goal: ExtractionGoal, status_container=None) -> List[DocumentFact]:
+        self.execution_logs = [] 
+        
+        # --- CHANGE: Unpack stats to improve transparency ---
+        batches, stats = self._create_batches(docs)
+        
+        if status_container:
+            msg = f"📦 Optimized {len(docs)} documents into {len(batches)} processing batches."
+            
+            # Detailed breakdown if splitting occurred
+            if stats["split_doc_count"] > 0:
+                msg += f"\n\nℹ️ **Detailed Breakdown:**\n" \
+                       f"- {stats['split_doc_count']} large documents exceeded the safety limit.\n" \
+                       f"- They were automatically split into {stats['total_split_chunks']} overlapping parts to ensure no data loss."
+            
+            status_container.write(msg)
+        
+        all_results = []
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_batch = {
+                executor.submit(self.map_document_batch, batch, goal): batch 
+                for batch in batches
+            }
+            
+            completed_batches = 0
+            for future in concurrent.futures.as_completed(future_to_batch):
+                completed_batches += 1
+                try:
+                    batch_results = future.result()
+                    all_results.extend(batch_results)
+                    if status_container:
+                        status_container.update(label=f"Processed batch {completed_batches}/{len(batches)}...", state="running")
+                except Exception as e:
+                    print(f"Batch failed: {e}")
+        
+        # --- CHANGE: Fix the "found relevant info" count logic ---
+        # We need to count Unique Document IDs, not chunks.
+        unique_doc_ids_with_info = set()
+        for f in all_results:
+            if f.has_relevant_info:
+                unique_doc_ids_with_info.add(f.doc_id)
+
+        if status_container:
+            status_container.write(f"✅ Extraction complete. Found relevant info in {len(unique_doc_ids_with_info)} unique documents (processed {len(all_results)} total fragments).")
+            
+        return all_results
 
 
+# ==========================================
+### 6. SCREENS  ###
+# ==========================================
 
+# --- SHARED ---
+
+@st.fragment
+def screen_extraction():
+    st.title("Chat with helper or write your own cypher")
+    
+    # 1. Define Tabs
+    tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
+    
+    # --- TAB 1: EXISTING AGENT CHAT (Preserved) ---
+    with tab_chat:
+        # Check Connections using credentials from app_state
+        creds = st.session_state.app_state["neo4j_creds"]
+        driver = get_cached_driver(creds["uri"], creds["auth"])
+        llm = get_cached_llm(st.session_state.app_state["mistral_key"])
+        
+        if not driver or not llm:
+            st.warning("System unavailable. Please check secrets.")
+            return
+            
+        # Pipeline: Pass schema_stats from app_state
+        pipeline = GraphRAGPipeline(driver, llm, st.session_state.app_state["schema_stats"])
+
+        # Chat UI: Iterate over chat_history in app_state
+        for chat in st.session_state.app_state["chat_history"]:
+            with st.chat_message(chat["role"]): st.write(chat["content"])
+        st.caption("*NOTE: The evidence output might have direction issues. In example if you ask for outgoing communication you might (also) get incoming. Prefer asking for communication in general to obtain both sides and filter later. *")
+        st.caption("*Make sure to view the evidence before making conclusions.*")
+
+        user_msg = st.chat_input("Ask about the graph...")
+        if user_msg:
+            # Update app_state chat history
+            st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
+            with st.chat_message("user"): st.write(user_msg)
+            
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing public dataset..."):
+                    result = pipeline.run(user_msg, session_id=st.session_state["app_session_id"])
+                    
+                    if result.get("status") == "ERROR":
+                        err_msg = result.get("error", "Unknown Error")
+                        st.error(f"Pipeline Error: {err_msg}")
+                        with st.expander("Technical Details"):
+                            st.write(result)
+                    else:
+                        ans = result.get("final_answer", "No answer generated.")
+                        st.write(ans)
+                        
+                        if result.get("cypher_query"):
+                            with st.expander("🕵️ Analysis Details (Cypher & Trace)"):
+                                if result.get("cypher_query"):
+                                    st.caption("Generated Cypher:")
+                                    st.code(result["cypher_query"], language="cypher")
+                                
+                                st.caption("Full Pipeline Trace Data:")
+                                st.json(result) # This shows the Intent/Grounding data we saved!
+
+                        st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
+                        
+                        if result.get("proof_ids"):
+                            st.session_state.app_state["evidence_locker"].append({
+                                "query": user_msg, "answer": ans, "ids": result["proof_ids"], "cypher": result["cypher_query"]
+                            })
+                            st.toast("Evidence saved to locker")
+
+    # --- TAB 2: RAW CYPHER INPUT (Updated with Save Logic) ---
+    with tab_cypher:
+        st.markdown("### Safe Cypher Execution")
+        st.caption("Read-Only mode active. Modifications (CREATE, SET, DELETE) are blocked.")
+        
+        # State container for manual query results
+        if "manual_results" not in st.session_state:
+            st.session_state.manual_results = None
+        if "manual_query_text" not in st.session_state:
+            st.session_state.manual_query_text = ""
+
+        cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n")
+        
+        if st.button("Run Query"):
+            if SAFETY_REGEX.search(cypher_input):
+                st.error("🚨 SECURITY ALERT: destructive commands are not allowed.")
+            else:
+                creds = st.session_state.app_state["neo4j_creds"]
+                driver = get_cached_driver(creds["uri"], creds["auth"])
+                
+                if driver:
+                    try:
+                        with driver.session() as session:
+                            res = session.run(cypher_input)
+                            data = [r.data() for r in res]
+                            
+                            # Save to temporary state for the 'Save' button to access
+                            st.session_state.manual_results = data
+                            st.session_state.manual_query_text = cypher_input
+                            
+                            if not data:
+                                st.warning("Query returned no results.")
+                    except Exception as e:
+                        st.error(f"Cypher Syntax Error: {e}")
+
+        # Display Results & Save Button (Persistent across reruns in fragment)
+        if st.session_state.manual_results:
+            st.divider()
+            st.subheader("Results")
+            st.dataframe(pd.DataFrame(st.session_state.manual_results), use_container_width=True)
+            
+            # Helper to count IDs found
+            found_ids = extract_provenance_from_result(st.session_state.manual_results)
+            st.caption(f"Found {len(found_ids)} potential document IDs.")
+            
+            if st.button("💾 Add Results to Locker"):
+                if found_ids:
+                    payload = {
+                        "query": f"Manual Cypher: {st.session_state.manual_query_text}",
+                        "answer": "Manually executed Cypher query results.",
+                        "ids": found_ids
+                    }
+                    st.session_state.app_state["evidence_locker"].append(payload)
+                    st.toast(f"Saved {len(found_ids)} IDs to Locker!")
+                else:
+                    st.warning("No IDs (provenance/source_pks) found in these results to save.")
+
+@st.fragment
+def screen_locker():
+    st.title("Evidence Cart")
+    locker = st.session_state.app_state.get("evidence_locker", [])
+    
+    if not locker:
+        st.info("Locker is empty.")
+        return
+
+    # 1. Initialize current selection session state if needed
+    current_selection = set()
+    global_selected = st.session_state.app_state.get("selected_ids", set())
+
+    for i, entry in enumerate(locker):
+        with st.container(border=True):
+            c1, c2 = st.columns([0.15, 0.85])
+            
+            # Preparation for Checkbox Persistence
+            entry_ids_str = {str(pid) for pid in entry["ids"]}
+            is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
+
+            with c1:
+                # The user-facing selection functionality
+                is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
+                if is_sel:
+                    # Keep propagation alive by adding all IDs to the selection set
+                    for pid in entry["ids"]:
+                        current_selection.add(str(pid))
+            
+            with c2:
+                st.markdown(f"**Query:** {entry['query']}")
+                # COSMETIC CHANGE: Show count instead of the full ID list
+                st.markdown(f"**Evidence Count:** `{len(entry['ids'])} documents`")
+                st.caption(f"Summary: {entry.get('answer', 'No description available.')}")
+                # # Cypher showcase here is exclusively for testing purposes. Commented out for the user. 
+                st.markdown(f"**Cypher:**  {entry['cypher']}")
+
+    # Commit selection back to the global state for the analyst
+    st.session_state.app_state["selected_ids"] = current_selection
+
+
+@st.fragment
+def screen_analysis():
+    st.title("Analysis Pane")
+    
+    # 1. Retrieve State
+    ids = list(st.session_state.app_state.get("selected_ids", []))
+    if not ids:
+        st.warning("No documents selected.")
+        return
+    
+    # Ensure data is loaded
+    if 'github_data' not in st.session_state:
+        # Assuming load_github_data is available in the main scope or imported
+        # For this file context, we assume it's loaded. 
+        # In real integration, import load_github_data from current.py
+        pass 
+        
+    df = st.session_state.github_data
+    matched = df[df['PK'].isin(ids)]
+    st.subheader(f"Analyzing {len(matched)} Documents")
+
+    # 2. Document Reader (Preserved from original)
+    doc_options = matched['Bates_Identity'].tolist()
+    selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
+    
+    if selected_bates:
+        view_row = matched[matched['Bates_Identity'] == selected_bates].iloc[0]
+        with st.container(border=True):
+            st.caption(f"Viewing: {view_row['Bates_Identity']}")
+            st.text_area("Body", view_row.get('Body', ''), height=200, disabled=True)
+
+    # 3. Agentic Chat Interface
+    st.divider()
+    st.write("### Agentic Analysis")
+    
+    q = st.chat_input("Ask about this evidence set:")
+    
+    if q:
+        api_key = st.session_state.app_state.get("mistral_key", "")
+        if not api_key:
+            st.error("Mistral API Key is missing.")
+            return
+
+        # Initialize Engine
+        # We instantiate here. In production, we might cache this object, 
+        # but for now, it's lightweight.
+        engine = MapReduceEngine(api_key=api_key)
+        
+        # Prepare Docs for the Engine
+        docs_payload = []
+        for _, row in matched.iterrows():
+            docs_payload.append({
+                "Body": row.get('Body', ''),
+                "Bates_Identity": row.get('Bates_Identity', 'Unknown')
+            })
+
+        # --- THE PIPELINE UI ---
+        
+        # We use st.status to give the user that "constant change" feedback
+        with st.status("Initializing Agent Swarm...", expanded=True) as status:
+            
+            # Step A: The Gatekeeper
+            strategy = engine.estimate_strategy([d['Body'] for d in docs_payload])
+            st.write(f"🧠 Gatekeeper Decision: **{strategy}** Mode")
+            
+            if strategy == "DIRECT":
+                # Fallback to simple logic for small context
+                status.update(label="Running Direct Analysis...", state="running")
+                # Simple concatenation
+                context = "\n".join([f"Doc: {d['Bates_Identity']}\n{d['Body']}" for d in docs_payload])
+                
+                # Use the 'reduce' llm for a direct answer
+                from langchain_core.prompts import ChatPromptTemplate
+                prompt = ChatPromptTemplate.from_template("Context: {context}\n\nQuestion: {q}")
+                chain = prompt | engine.llm_reduce
+                response = chain.invoke({"context": context, "q": q})
+                final_answer = response.content
+                status.update(label="Analysis Complete", state="complete", expanded=False)
+
+            else:
+                # MAP-REDUCE STRATEGY
+                
+                # Step B: The Architect
+                status.write("🏗️ Architect is analyzing your question...")
+                extraction_goal = engine.architect_query(q)
+                status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
+                
+                # Step C: Parallel Map
+                status.update(label="Agents are scanning documents...", state="running")
+                status.write(f"🚀 Spawning {len(docs_payload)} extraction agents...")
+                
+                # This function updates the status label as it runs
+                facts = engine.run_parallel_map(docs_payload, extraction_goal, status_container=status)
+                
+                relevant_count = sum(1 for f in facts if f.has_relevant_info)
+                status.write(f"✅ Extraction complete. Found relevant info in {relevant_count} documents.")
+                
+                # Step D: Reduce
+                status.update(label="Synthesizing Final Answer...", state="running")
+                final_answer = engine.reduce_facts(facts, q)
+                status.update(label="Analysis Complete", state="complete", expanded=False)
+
+        # 4. Display Result
+        if final_answer:
+            st.info(final_answer)
+            
+            # Optional: Show citations/sources if in Map-Reduce mode
+            if strategy == "MAP_REDUCE" and 'facts' in locals():
+                with st.expander("View Source Citations"):
+                    for f in facts:
+                        if f.has_relevant_info:
+                            st.markdown(f"**{f.doc_id}**")
+                            st.caption(f"Reasoning: {f.extracted_summary}")
+                            for quote in f.relevant_quotes:
+                                st.text(f"\"{quote}\"")
+                            st.divider()
+
+# --- DESKTOP ---
 
 @st.fragment
 def render_explorer_workspace(selector_type, selected_items):
@@ -855,11 +1898,7 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         
     else:
         return ""
-    
-# ==========================================
-# 4. MAIN SCREEN CONTROLLER
-# ==========================================
-
+        
 def screen_databook():
     st.title("Find Evidence Manually")
     
@@ -1027,156 +2066,11 @@ def screen_databook():
             selector_type, 
             st.session_state.active_explorer_items
         )
-        
 # ==========================================
-# 0. NON ORGANIZED PARTS
+### 7. PROMPTS  ###
 # ==========================================
 
-#WELCOME BUTTON
-@st.dialog("Welcome")
-def show_welcome_popup():
-    # 2. Add welcome pop up
-    st.write(WELCOME_TEXT)
-    if st.button("Get Started"):
-        st.session_state.welcome_shown = True
-        st.rerun()
-# --- APP CONFIGURATION ---
-st.set_page_config(page_title="AI Graph Analyst", layout="wide", page_icon="🕸️")
-
-# --- CONSTANTS & CONFIG ---
-LLM_MODEL = "mistral-medium"
-SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
-
-# --- OPTIMIZATION: CACHED RESOURCES ---
-# These functions prevent the app from reconnecting to DB/API on every rerun.
-
-@st.cache_resource
-def get_cached_driver(uri, auth):
-    """Maintains a persistent Neo4j connection pool."""
-    cleaned_uri = uri.strip()
-    if not any(cleaned_uri.startswith(p) for p in ["neo4j+s://", "bolt://", "neo4j://"]):
-        cleaned_uri = f"neo4j+s://{cleaned_uri}"
-    driver = GraphDatabase.driver(cleaned_uri, auth=auth)
-    driver.verify_connectivity()
-    return driver
-
-@st.cache_resource
-def get_cached_llm(api_key):
-    """Maintains a persistent LLM client."""
-    return ChatMistralAI(
-        model=LLM_MODEL,
-        api_key=api_key,
-        temperature=0.0
-    )
-
-@st.cache_data
-def load_github_data():
-    """
-    Loads external context data efficiently and performs deduplication logic.
-    Also synthetically creates 'Bates_Identity' and ensures 'Text Link' exists.
-    """
-    url = "https://raw.githubusercontent.com/ssopic/some_data/main/sum_data.csv"
-    try:
-        df = pd.read_csv(url)
-        
-        # 1. Basic Cleaning
-        # Convert PK to string, remove potential '.0' from floats, and strip whitespace
-        df['PK'] = df['PK'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        
-        # 2. Bates & Link Column Handling
-        # The source data might not have these columns, so we initialize them if missing.
-        for col in ['Bates Begin', 'Bates End', 'Text Link']:
-            if col not in df.columns:
-                df[col] = "" # Initialize if missing
-            # Clean: to string, remove float decimals, strip whitespace
-            df[col] = df[col].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            
-        # 3. Create Bates Identity (User Requirement)
-        # Since 'Bates Identity' does not exist in source, we construct it: "Begin End"
-        df['Bates_Identity'] = df['Bates Begin'] + " " + df['Bates End']
-        # Fallback: If result is just whitespace (missing bates), use "Doc_PK" to ensure UI has a label
-        df['Bates_Identity'] = df['Bates_Identity'].apply(lambda x: x if x.strip() else None)
-        df['Bates_Identity'] = df['Bates_Identity'].fillna("Doc_" + df['PK'])
-        
-        # 4. Sequence Logic Processing
-        if 'chain_sequence_order' in df.columns:
-            # Ensure sequence is numeric for correct sorting
-            df['chain_sequence_order'] = pd.to_numeric(df['chain_sequence_order'], errors='coerce')
-            
-            # Sort by sequence descending (Highest first)
-            df = df.sort_values(by="chain_sequence_order", ascending=False)
-            
-            # Drop duplicates on PK, keeping the 'first' (highest sequence)
-            df = df.drop_duplicates(subset=["PK"], keep="first")
-            
-        return df
-    except Exception as e:
-        # Fallback empty dataframe structure with all required columns
-        return pd.DataFrame(columns=['PK', 'Bates Begin', "Bates End", "Body", "Text Link", "chain_sequence_order", "Bates_Identity"])
-
-
-# --- SCHEMA DEFINITIONS (Preserved from Old Version) ---
-
-class StructuredBlueprint(BaseModel):
-    intent: str = Field(description="The primary action: FindEntity, FindPath, MultiHopAnalysis, etc.")
-    target_entity_nl: str = Field(description="Natural language term for the primary entity.")
-    source_entity_nl: str = Field(description="Natural language term for the starting entity or context.")
-    complexity: str = Field(description="Simple, MultiHop, or Aggregation.")
-    proposed_relationships: List[str] = Field(default_factory=list, description="List of sequential relationships or verbs. EXTRACT VERBATIM. Do not normalize. If user says 'bribed', output 'bribed'.")
-    filter_on_verbs: List[str] = Field(default_factory=list, description="Specific raw verbs to filter by.")
-    constraints: List[str] = Field(description="Temporal or attribute constraints.")
-    properties_to_return: List[str] = Field(description="Properties the user wants to see.")
-
-class GroundingOutput(BaseModel):
-    thought_process: str = Field(description="Step-by-step reasoning.")
-    source_node_label: str = Field(description="Primary source node label.")
-    target_node_label: str = Field(description="Primary target node label.")
-    relationship_paths: List[str] = Field(description="Ordered list of specific relationship types.")
-    target_node_variable: str = Field(description="Cypher var for target.")
-    source_node_variable: str = Field(description="Cypher var for source.")
-    cypher_constraint_fragment: str = Field(description="WHERE clause fragment.")
-    cypher_return_fragment: str = Field(description="RETURN statement fragment.")
-
-class GroundedComponent(BaseModel):
-    source_node_label: str
-    target_node_label: str
-    relationship_paths: List[str]
-    cypher_constraint_clause: str
-    return_variables: str
-    target_node_variable: str
-    source_node_variable: str
-    filter_on_verbs: List[str] = Field(default_factory=list)
-
-class CorrectionReport(BaseModel):
-    error_source_agent: str
-    correction_needed: str
-    fixed_cypher: Optional[str] = Field(None)
-    new_blueprint_fragment: Optional[Dict[str, Any]] = Field(None)
-
-class PrunedSchema(BaseModel):
-    NodeLabels: List[str]
-    RelationshipTypes: List[str]
-    NodeProperties: Dict[str, List[str]]
-    RelationshipProperties: Dict[str, List[str]]
-    # NEW: Friction Reducers for when the user specifically asks for verbs and labels.
-    verb_mapping: Dict[str, str] = Field(
-        default_factory=dict, 
-        description="Map from Blueprint Verb (key) to Schema Relationship Type (value). Example: {'paid': 'FINANCIAL_TRANSACTION'}"
-    )
-    entity_mapping: Dict[str, str] = Field(
-        default_factory=dict, 
-        description="Map from Blueprint Keyword (key) to Schema Node Label (value). Example: {'island': 'LOCATION'}"
-    )
-
-class SynthesisOutput(BaseModel):
-    final_answer: str
-    source_document_ids: List[str] = Field(default_factory=list)
-
-class CypherWrapper(BaseModel):
-    query: str
-
-# --- SYSTEM PROMPTS  ---
-
+# --- PROMPTS FOR GRAPHRAG PIPELINE  ---
 
 SYSTEM_PROMPTS = {
   "Intent Planner": """
@@ -1377,253 +2271,9 @@ GUIDELINES:
 """
 }
 
-# --- UTILITIES ---
-
-def fetch_schema_statistics(uri: str, auth: tuple) -> Dict[str, Any]:
-    """
-    Connects to DB and creates comprehensive schema stats.
-    Optimization: Uses a one-off connection here, but logic is robust.
-    """
-    stats = {
-        "status": "INIT", "NodeCounts": {}, "RelationshipVerbs": {},
-        "NodeLabels": [], "RelationshipTypes": [], 
-        "NodeProperties": {}, "RelationshipProperties": {}
-    }
-    driver = None
-    try:
-        # We don't use the cached driver here to allow for connection testing with new creds
-        cleaned_uri = uri.strip()
-        if not any(cleaned_uri.startswith(p) for p in ["neo4j+s://", "bolt://", "neo4j://"]):
-            cleaned_uri = f"neo4j+s://{cleaned_uri}"
-            
-        driver = GraphDatabase.driver(cleaned_uri, auth=auth)
-        driver.verify_connectivity()
-
-        with driver.session() as session:
-            stats["NodeLabels"] = session.run("CALL db.labels()").value()
-            stats["RelationshipTypes"] = session.run("CALL db.relationshipTypes()").value()
-
-            for label in stats["NodeLabels"]:
-                count = session.run(f"MATCH (n:`{label}`) RETURN count(n) as c").single()["c"]
-                stats["NodeCounts"][label] = count
-
-            for r_type in stats["RelationshipTypes"]:
-                try:
-                    verb_q = f"MATCH ()-[r:`{r_type}`]->() WHERE r.raw_verbs IS NOT NULL UNWIND r.raw_verbs as v RETURN DISTINCT v "
-                    verbs = [record["v"] for record in session.run(verb_q)]
-                    stats["RelationshipVerbs"][r_type] = verbs
-                except: stats["RelationshipVerbs"][r_type] = []
-
-            # Optimized Property Fetching
-            node_props_q = "CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName RETURN nodeType, collect(propertyName) as props"
-            for record in session.run(node_props_q):
-                raw_type = record["nodeType"]
-                if raw_type.startswith(":"):
-                    for label in raw_type[1:].split(":"):
-                        current_props = set(stats["NodeProperties"].get(label, []))
-                        current_props.update(record["props"])
-                        stats["NodeProperties"][label] = list(current_props)
-
-            rel_props_q = "CALL db.schema.relTypeProperties() YIELD relType, propertyName RETURN relType, collect(propertyName) as props"
-            for record in session.run(rel_props_q):
-                raw_type = record["relType"]
-                if raw_type.startswith(":"):
-                    stats["RelationshipProperties"][raw_type[1:]] = record["props"]
-
-            stats["status"] = "SUCCESS"
-    except Exception as e:
-        stats["status"] = "ERROR"
-        stats["error"] = str(e)
-    finally:
-        if driver: driver.close()
-    return stats
-
-def extract_provenance_from_result(result: Union[Dict, List]) -> List[str]:
-    """Scans JSON recursively for keys indicating ID storage (provenance, pks, doc_id)."""
-    ids = []
-    # Broader set of keywords to catch un-aliased returns like 'r.source_pks'
-    target_keys = ["provenance", "source_pks", "doc_id", "id_list", "pk"]
-    
-    def recurse(data):
-        if isinstance(data, dict):
-            for k, v in data.items():
-                # Check if ANY target key matches the result key (case-insensitive)
-                if any(t in k.lower() for t in target_keys):
-                    if isinstance(v, list): ids.extend([str(i) for i in v])
-                    else: ids.append(str(v))
-                else: 
-                    recurse(v)
-        elif isinstance(data, list):
-            for item in data: recurse(item)
-            
-    recurse(result)
-    return list(set(ids))
-
-# --- PIPELINE CLASS (Optimized) ---
-
-class GraphRAGPipeline:
-    def __init__(self, driver: Driver, llm: ChatMistralAI, schema_stats: Dict[str, Any]):
-        self.driver = driver
-        self.llm = llm
-        self.schema_stats = schema_stats or {}
-
-    def _get_full_schema(self) -> Dict[str, Any]:
-        return {
-            "NodeLabels": self.schema_stats.get("NodeLabels", []),
-            "RelationshipTypes": self.schema_stats.get("RelationshipTypes", []),
-            "NodeProperties": self.schema_stats.get("NodeProperties", {}),
-            "RelationshipProperties": self.schema_stats.get("RelationshipProperties", {})
-        }
-
-    def _check_query_safety(self, cypher: str) -> bool:
-        return not bool(SAFETY_REGEX.search(cypher))
-
-    @traceable 
-    def _run_agent(self, agent_name: str, output_model: BaseModel, context: Dict) -> Any:
-        
-        # ---  Dynamic Renaming Logic ---
-        rt = get_current_run_tree()
-        if rt:
-            rt.name = agent_name
-        # ---------------------------------
-
-        sys_prompt = SYSTEM_PROMPTS.get(agent_name, "")
-        
-        formatted_context = {}
-        for k, v in context.items():
-            if isinstance(v, BaseModel): 
-                formatted_context[k] = v.model_dump_json(indent=2)
-            elif isinstance(v, (dict, list)): 
-                formatted_context[k] = json.dumps(v, indent=2)
-            else: 
-                formatted_context[k] = str(v)
-
-        msgs = [("system", sys_prompt)]
-        
-        # Prompt Mapping
-        if agent_name == "Intent Planner": 
-            msgs.append(("human", "QUERY: {user_query}"))
-        elif agent_name == "Schema Selector": 
-            msgs.append(("human", "BLUEPRINT: {blueprint}\nFULL_SCHEMA: {full_schema}"))
-        elif agent_name == "Grounding Agent": 
-            msgs.append(("human", "BLUEPRINT: {blueprint}\nSCHEMA: {schema}\nQUERY: {user_query}"))
-        elif agent_name == "Cypher Generator": 
-            msgs.append(("human", "GROUNDED_COMPONENT: {blueprint}"))
-        elif agent_name == "Query Debugger": 
-            msgs.append(("human", "ERROR: {error}\nQUERY: {failed_query}\nBLUEPRINT: {blueprint}\nWARNINGS: {warnings}"))
-        elif agent_name == "Synthesizer": 
-            msgs.append(("human", "QUERY: {user_query}\nCYPHER: {final_cypher}\nRESULTS: {db_result}"))
-        
-        prompt = ChatPromptTemplate.from_messages(msgs)
-        return (prompt | self.llm.with_structured_output(output_model)).invoke(formatted_context)
-        
-    @traceable(name="GraphRAG Main Pipeline")
-    def run(self, user_query: str, session_id: str = "default") -> Dict[str, Any]:
-        rt = get_current_run_tree()
-        if rt:
-            rt.add_metadata({"session_id": session_id})
-        pipeline_object = {"user_query": user_query, "status": "INIT", "execution_history": [], "proof_ids": []}
-        
-        try:
-            # 1. Intent
-            pipeline_object["status"] = "PLANNING"
-            blueprint = self._run_agent("Intent Planner", StructuredBlueprint, {"user_query": user_query})
-
-            pipeline_object["intent_data"] = blueprint.model_dump() # Save for debugging
-            
-            # 2. Schema
-            full_schema = self._get_full_schema()
-            pruned_schema = self._run_agent("Schema Selector", PrunedSchema, {"blueprint": blueprint, "full_schema": full_schema})
-            
-            # 3. Grounding
-            grounding = self._run_agent("Grounding Agent", GroundingOutput, {"blueprint": blueprint, "schema": pruned_schema.model_dump(), "user_query": user_query})
-            pipeline_object["grounding_data"] = grounding.model_dump() # Save for debugging
-            
-            grounded_comp = GroundedComponent(
-                source_node_label=grounding.source_node_label,
-                target_node_label=grounding.target_node_label,
-                relationship_paths=grounding.relationship_paths,
-                cypher_constraint_clause=grounding.cypher_constraint_fragment,
-                return_variables=grounding.cypher_return_fragment,
-                target_node_variable=grounding.target_node_variable,
-                source_node_variable=grounding.source_node_variable,
-                filter_on_verbs=blueprint.filter_on_verbs
-            )
-
-            # 4. Generation
-            cypher_resp = self._run_agent("Cypher Generator", CypherWrapper, {"blueprint": grounded_comp})
-            raw_cypher = cypher_resp.query.replace("\n", " ")
-            if not self._check_query_safety(raw_cypher): raise ValueError("Unsafe Cypher detected.")
-            pipeline_object["cypher_query"] = raw_cypher
-
-            # 5. Execution & Retry Loop
-            pipeline_object["status"] = "EXECUTING"
-            results = []
-            
-            for attempt in range(1, 4):
-                attempt_log = {"attempt": attempt, "cypher": raw_cypher, "status": "PENDING", "warnings": []}
-                try:
-                    with self.driver.session() as session:
-                        res_obj = session.run(raw_cypher)
-                        records = [r.data() for r in res_obj]
-                        
-                        # Capture notifications/warnings if available
-                        summary = res_obj.consume()
-                        if summary.notifications:
-                             # FIX: Robust warning handling (Dict vs Object)
-                             warnings = []
-                             for n in summary.notifications:
-                                 # Handle Neo4j driver returning dicts instead of objects
-                                 if isinstance(n, dict):
-                                     code = n.get("code", "UNKNOWN")
-                                     msg = n.get("description", "No description")
-                                 else:
-                                     code = getattr(n, "code", "UNKNOWN")
-                                     msg = getattr(n, "description", "No description")
-                                 warnings.append({"code": code, "message": msg})
-                             attempt_log["warnings"] = warnings
-                        
-                        results = records
-                        attempt_log["status"] = "SUCCESS"
-                        pipeline_object["execution_history"].append(attempt_log)
-                        pipeline_object["cypher_query"] = raw_cypher # Update in case of fix
-                        break
-                except Exception as e:
-                    attempt_log["status"] = "FAILED"
-                    attempt_log["error"] = str(e)
-                    pipeline_object["execution_history"].append(attempt_log)
-                    
-                    if attempt < 3:
-                        correction = self._run_agent("Query Debugger", CorrectionReport, {
-                            "error": str(e), "failed_query": raw_cypher, 
-                            "blueprint": grounded_comp, "schema": full_schema, 
-                            "warnings": attempt_log["warnings"]
-                        })
-                        if correction.fixed_cypher: raw_cypher = correction.fixed_cypher.replace("\n", " ")
-                        else: break
-                    else: raise e
-
-            # 6. Synthesis
-            pipeline_object["raw_results"] = results
-            pipeline_object["proof_ids"] = extract_provenance_from_result(results) # Internal utility
-            
-            if not results:
-                pipeline_object["final_answer"] = "No information found."
-            else:
-                synth = self._run_agent("Synthesizer", SynthesisOutput, {
-                    "user_query": user_query, "final_cypher": raw_cypher, "db_result": results[:50]
-                })
-                pipeline_object["final_answer"] = synth.final_answer
-            
-            pipeline_object["status"] = "SUCCESS"
-
-        except Exception as e:
-            pipeline_object["status"] = "ERROR"
-            pipeline_object["error"] = str(e)
-            
-        return pipeline_object
-
-# --- INITIALIZATION ---
+# ==========================================
+# 8. AUTHENTICATION & SETTINGS LOGIC
+# ==========================================
 
 if 'github_data' not in st.session_state:
     st.session_state.github_data = load_github_data()
@@ -1633,47 +2283,6 @@ if "app_state" not in st.session_state:
         "connected": False, "mistral_key": "", "neo4j_creds": {}, 
         "schema_stats": {}, "evidence_locker": [], "selected_ids": set(), "chat_history": []
     }
-
-# --- SCREENS ---
-
-# ==========================================
-# AUTHENTICATION & SETTINGS LOGIC
-# ==========================================
-
-def get_config(key, default=""):
-    """Helper to get credentials from Secrets (Cloud) or Env (Local)."""
-    if key in st.secrets:
-        return st.secrets[key]
-    return os.environ.get(key, default)
-
-def attempt_connection(uri, username, password, api_key):
-    """
-    Attempts to connect to Neo4j and validate the Mistral Key.
-    Returns (Success: bool, Message: str)
-    """
-    try:
-        # Validate Neo4j connection using your existing function
-        stats = fetch_schema_statistics(uri, (username, password))
-        
-        if stats["status"] == "SUCCESS":
-            # Update Session State on success
-            st.session_state.app_state.update({
-                "connected": True,
-                "mistral_key": api_key,
-                "neo4j_creds": {
-                    "uri": uri, 
-                    "user": username, 
-                    "pass": password, 
-                    "auth": (username, password)
-                },
-                "schema_stats": stats
-            })
-            return True, "✅ Successfully connected to Neo4j & Mistral!"
-        else:
-            return False, f"Neo4j Error: {stats.get('error')}"
-
-    except Exception as e:
-        return False, f"Connection Failed: {str(e)}"
 
 @st.dialog("⚙️ Settings")
 def show_settings_dialog():
@@ -1726,712 +2335,22 @@ def show_settings_dialog():
                 st.error(msg)
 
 
-@st.fragment
-def screen_extraction():
-    st.title("Chat with helper or write your own cypher")
-    
-    # 1. Define Tabs
-    tab_chat, tab_cypher = st.tabs(["💬 Agent Chat", "🛠️ Raw Cypher"])
-    
-    # --- TAB 1: EXISTING AGENT CHAT (Preserved) ---
-    with tab_chat:
-        # Check Connections using credentials from app_state
-        creds = st.session_state.app_state["neo4j_creds"]
-        driver = get_cached_driver(creds["uri"], creds["auth"])
-        llm = get_cached_llm(st.session_state.app_state["mistral_key"])
-        
-        if not driver or not llm:
-            st.warning("System unavailable. Please check secrets.")
-            return
-            
-        # Pipeline: Pass schema_stats from app_state
-        pipeline = GraphRAGPipeline(driver, llm, st.session_state.app_state["schema_stats"])
 
-        # Chat UI: Iterate over chat_history in app_state
-        for chat in st.session_state.app_state["chat_history"]:
-            with st.chat_message(chat["role"]): st.write(chat["content"])
-        st.caption("*NOTE: The evidence output might have direction issues. In example if you ask for outgoing communication you might (also) get incoming. Prefer asking for communication in general to obtain both sides and filter later. *")
-        st.caption("*Make sure to view the evidence before making conclusions.*")
 
-        user_msg = st.chat_input("Ask about the graph...")
-        if user_msg:
-            # Update app_state chat history
-            st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
-            with st.chat_message("user"): st.write(user_msg)
-            
-            with st.chat_message("assistant"):
-                with st.spinner("Analyzing public dataset..."):
-                    result = pipeline.run(user_msg, session_id=st.session_state["app_session_id"])
-                    
-                    if result.get("status") == "ERROR":
-                        err_msg = result.get("error", "Unknown Error")
-                        st.error(f"Pipeline Error: {err_msg}")
-                        with st.expander("Technical Details"):
-                            st.write(result)
-                    else:
-                        ans = result.get("final_answer", "No answer generated.")
-                        st.write(ans)
-                        
-                        if result.get("cypher_query"):
-                            with st.expander("🕵️ Analysis Details (Cypher & Trace)"):
-                                if result.get("cypher_query"):
-                                    st.caption("Generated Cypher:")
-                                    st.code(result["cypher_query"], language="cypher")
-                                
-                                st.caption("Full Pipeline Trace Data:")
-                                st.json(result) # This shows the Intent/Grounding data we saved!
 
-                        st.session_state.app_state["chat_history"].append({"role": "assistant", "content": ans})
-                        
-                        if result.get("proof_ids"):
-                            st.session_state.app_state["evidence_locker"].append({
-                                "query": user_msg, "answer": ans, "ids": result["proof_ids"], "cypher": result["cypher_query"]
-                            })
-                            st.toast("Evidence saved to locker")
 
-    # --- TAB 2: RAW CYPHER INPUT (Updated with Save Logic) ---
-    with tab_cypher:
-        st.markdown("### Safe Cypher Execution")
-        st.caption("Read-Only mode active. Modifications (CREATE, SET, DELETE) are blocked.")
-        
-        # State container for manual query results
-        if "manual_results" not in st.session_state:
-            st.session_state.manual_results = None
-        if "manual_query_text" not in st.session_state:
-            st.session_state.manual_query_text = ""
+#######################################################################
+# --- 9. GLOBAL UI COMPONENTS AND CSS(THEME, CUSTOM CSS INJECTION) ---
+######################################################################
+#WELCOME BUTTON
+@st.dialog("Welcome")
+def show_welcome_popup():
+    # 2. Add welcome pop up
+    st.write(WELCOME_TEXT)
+    if st.button("Get Started"):
+        st.session_state.welcome_shown = True
+        st.rerun()
 
-        cypher_input = st.text_area("Enter Cypher Query", height=150, value="MATCH (n) RETURN n")
-        
-        if st.button("Run Query"):
-            if SAFETY_REGEX.search(cypher_input):
-                st.error("🚨 SECURITY ALERT: destructive commands are not allowed.")
-            else:
-                creds = st.session_state.app_state["neo4j_creds"]
-                driver = get_cached_driver(creds["uri"], creds["auth"])
-                
-                if driver:
-                    try:
-                        with driver.session() as session:
-                            res = session.run(cypher_input)
-                            data = [r.data() for r in res]
-                            
-                            # Save to temporary state for the 'Save' button to access
-                            st.session_state.manual_results = data
-                            st.session_state.manual_query_text = cypher_input
-                            
-                            if not data:
-                                st.warning("Query returned no results.")
-                    except Exception as e:
-                        st.error(f"Cypher Syntax Error: {e}")
-
-        # Display Results & Save Button (Persistent across reruns in fragment)
-        if st.session_state.manual_results:
-            st.divider()
-            st.subheader("Results")
-            st.dataframe(pd.DataFrame(st.session_state.manual_results), use_container_width=True)
-            
-            # Helper to count IDs found
-            found_ids = extract_provenance_from_result(st.session_state.manual_results)
-            st.caption(f"Found {len(found_ids)} potential document IDs.")
-            
-            if st.button("💾 Add Results to Locker"):
-                if found_ids:
-                    payload = {
-                        "query": f"Manual Cypher: {st.session_state.manual_query_text}",
-                        "answer": "Manually executed Cypher query results.",
-                        "ids": found_ids
-                    }
-                    st.session_state.app_state["evidence_locker"].append(payload)
-                    st.toast(f"Saved {len(found_ids)} IDs to Locker!")
-                else:
-                    st.warning("No IDs (provenance/source_pks) found in these results to save.")
-
-@st.fragment
-def screen_locker():
-    st.title("Evidence Cart")
-    locker = st.session_state.app_state.get("evidence_locker", [])
-    
-    if not locker:
-        st.info("Locker is empty.")
-        return
-
-    # 1. Initialize current selection session state if needed
-    current_selection = set()
-    global_selected = st.session_state.app_state.get("selected_ids", set())
-
-    for i, entry in enumerate(locker):
-        with st.container(border=True):
-            c1, c2 = st.columns([0.15, 0.85])
-            
-            # Preparation for Checkbox Persistence
-            entry_ids_str = {str(pid) for pid in entry["ids"]}
-            is_checked_default = entry_ids_str.issubset(global_selected) if entry_ids_str else False
-
-            with c1:
-                # The user-facing selection functionality
-                is_sel = st.checkbox("Select", key=f"sel_{i}", value=is_checked_default)
-                if is_sel:
-                    # Keep propagation alive by adding all IDs to the selection set
-                    for pid in entry["ids"]:
-                        current_selection.add(str(pid))
-            
-            with c2:
-                st.markdown(f"**Query:** {entry['query']}")
-                # COSMETIC CHANGE: Show count instead of the full ID list
-                st.markdown(f"**Evidence Count:** `{len(entry['ids'])} documents`")
-                st.caption(f"Summary: {entry.get('answer', 'No description available.')}")
-                # # Cypher showcase here is exclusively for testing purposes. Commented out for the user. 
-                st.markdown(f"**Cypher:**  {entry['cypher']}")
-
-    # Commit selection back to the global state for the analyst
-    st.session_state.app_state["selected_ids"] = current_selection
-
-
-#############################################################################
-#### The analysis screen
-#### This screen takes the dataframe containing our evidence and analyzes it 
-#############################################################################
-@st.fragment
-def screen_analysis():
-    st.title("Analysis Pane")
-    
-    # 1. Retrieve State
-    ids = list(st.session_state.app_state.get("selected_ids", []))
-    if not ids:
-        st.warning("No documents selected.")
-        return
-    
-    # Ensure data is loaded
-    if 'github_data' not in st.session_state:
-        # Assuming load_github_data is available in the main scope or imported
-        # For this file context, we assume it's loaded. 
-        # In real integration, import load_github_data from current.py
-        pass 
-        
-    df = st.session_state.github_data
-    matched = df[df['PK'].isin(ids)]
-    st.subheader(f"Analyzing {len(matched)} Documents")
-
-    # 2. Document Reader (Preserved from original)
-    doc_options = matched['Bates_Identity'].tolist()
-    selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
-    
-    if selected_bates:
-        view_row = matched[matched['Bates_Identity'] == selected_bates].iloc[0]
-        with st.container(border=True):
-            st.caption(f"Viewing: {view_row['Bates_Identity']}")
-            st.text_area("Body", view_row.get('Body', ''), height=200, disabled=True)
-
-    # 3. Agentic Chat Interface
-    st.divider()
-    st.write("### Agentic Analysis")
-    
-    q = st.chat_input("Ask about this evidence set:")
-    
-    if q:
-        api_key = st.session_state.app_state.get("mistral_key", "")
-        if not api_key:
-            st.error("Mistral API Key is missing.")
-            return
-
-        # Initialize Engine
-        # We instantiate here. In production, we might cache this object, 
-        # but for now, it's lightweight.
-        engine = MapReduceEngine(api_key=api_key)
-        
-        # Prepare Docs for the Engine
-        docs_payload = []
-        for _, row in matched.iterrows():
-            docs_payload.append({
-                "Body": row.get('Body', ''),
-                "Bates_Identity": row.get('Bates_Identity', 'Unknown')
-            })
-
-        # --- THE PIPELINE UI ---
-        
-        # We use st.status to give the user that "constant change" feedback
-        with st.status("Initializing Agent Swarm...", expanded=True) as status:
-            
-            # Step A: The Gatekeeper
-            strategy = engine.estimate_strategy([d['Body'] for d in docs_payload])
-            st.write(f"🧠 Gatekeeper Decision: **{strategy}** Mode")
-            
-            if strategy == "DIRECT":
-                # Fallback to simple logic for small context
-                status.update(label="Running Direct Analysis...", state="running")
-                # Simple concatenation
-                context = "\n".join([f"Doc: {d['Bates_Identity']}\n{d['Body']}" for d in docs_payload])
-                
-                # Use the 'reduce' llm for a direct answer
-                from langchain_core.prompts import ChatPromptTemplate
-                prompt = ChatPromptTemplate.from_template("Context: {context}\n\nQuestion: {q}")
-                chain = prompt | engine.llm_reduce
-                response = chain.invoke({"context": context, "q": q})
-                final_answer = response.content
-                status.update(label="Analysis Complete", state="complete", expanded=False)
-
-            else:
-                # MAP-REDUCE STRATEGY
-                
-                # Step B: The Architect
-                status.write("🏗️ Architect is analyzing your question...")
-                extraction_goal = engine.architect_query(q)
-                status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
-                
-                # Step C: Parallel Map
-                status.update(label="Agents are scanning documents...", state="running")
-                status.write(f"🚀 Spawning {len(docs_payload)} extraction agents...")
-                
-                # This function updates the status label as it runs
-                facts = engine.run_parallel_map(docs_payload, extraction_goal, status_container=status)
-                
-                relevant_count = sum(1 for f in facts if f.has_relevant_info)
-                status.write(f"✅ Extraction complete. Found relevant info in {relevant_count} documents.")
-                
-                # Step D: Reduce
-                status.update(label="Synthesizing Final Answer...", state="running")
-                final_answer = engine.reduce_facts(facts, q)
-                status.update(label="Analysis Complete", state="complete", expanded=False)
-
-        # 4. Display Result
-        if final_answer:
-            st.info(final_answer)
-            
-            # Optional: Show citations/sources if in Map-Reduce mode
-            if strategy == "MAP_REDUCE" and 'facts' in locals():
-                with st.expander("View Source Citations"):
-                    for f in facts:
-                        if f.has_relevant_info:
-                            st.markdown(f"**{f.doc_id}**")
-                            st.caption(f"Reasoning: {f.extracted_summary}")
-                            for quote in f.relevant_quotes:
-                                st.text(f"\"{quote}\"")
-                            st.divider()
-
-
-#############################################################################
-#The modification that allows for extracting information from multiple documents without breaking the context window 
-#############################################################################
-import concurrent.futures
-from typing import List, Optional
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-
-# --- CONFIGURATION ---
-TOKEN_THRESHOLD_CHARS = 40000 
-MAX_WORKERS = 4 
-# Batch Size Strategy:
-# 15,000 chars is roughly 3,500 - 4,000 tokens. 
-# Mistral Small has a 32k context, but keeping it smaller ensures higher attention/recall per doc.
-BATCH_SIZE_CHARS = 15000 
-
-# --- PYDANTIC MODELS ---
-
-class ExtractionGoal(BaseModel):
-    """Generated by the Architect to guide the Map Agents."""
-    goal_description: str = Field(description="Specific instructions on what information to extract.")
-    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
-
-class DocumentFact(BaseModel):
-    """The output of a Map Agent reading a single document."""
-    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
-    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
-    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
-    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
-
-class BatchExtractionResult(BaseModel):
-    """Wrapper to handle multiple document extractions in one pass."""
-    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
-
-# --- THE ENGINE CLASS ---
-
-import concurrent.futures
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-
-# --- CONFIGURATION ---
-TOKEN_THRESHOLD_CHARS = 40000 
-MAX_WORKERS = 4 
-# Batch Size Strategy:
-# 15,000 chars is roughly 3,500 - 4,000 tokens. 
-# Mistral Small has a 32k context, but keeping it smaller ensures higher attention/recall per doc.
-BATCH_SIZE_CHARS = 15000 
-
-# --- PYDANTIC MODELS ---
-
-class ExtractionGoal(BaseModel):
-    """Generated by the Architect to guide the Map Agents."""
-    goal_description: str = Field(description="Specific instructions on what information to extract.")
-    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
-
-class DocumentFact(BaseModel):
-    """The output of a Map Agent reading a single document."""
-    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
-    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
-    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
-    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
-
-class BatchExtractionResult(BaseModel):
-    """Wrapper to handle multiple document extractions in one pass."""
-    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
-
-# --- THE ENGINE CLASS ---
-
-import concurrent.futures
-import math
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-
-# --- CONFIGURATION ---
-TOKEN_THRESHOLD_CHARS = 40000 
-MAX_WORKERS = 4 
-# Batch Size Strategy:
-# 15,000 chars is roughly 3,500 - 4,000 tokens. 
-BATCH_SIZE_CHARS = 15000 
-# New: Overlap for splitting large docs (Split Brain Fix)
-OVERLAP_CHARS = 1000 
-
-# --- PYDANTIC MODELS ---
-
-class ExtractionGoal(BaseModel):
-    """Generated by the Architect to guide the Map Agents."""
-    goal_description: str = Field(description="Specific instructions on what information to extract.")
-    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
-
-class DocumentFact(BaseModel):
-    """The output of a Map Agent reading a single document."""
-    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
-    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
-    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
-    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
-
-class BatchExtractionResult(BaseModel):
-    """Wrapper to handle multiple document extractions in one pass."""
-    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
-
-# --- THE ENGINE CLASS ---
-
-import concurrent.futures
-import math
-from typing import List, Optional, Dict, Any, Tuple
-from pydantic import BaseModel, Field
-from langchain_mistralai import ChatMistralAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-
-# --- CONFIGURATION ---
-TOKEN_THRESHOLD_CHARS = 40000 
-MAX_WORKERS = 4 
-# Batch Size Strategy:
-# 15,000 chars is roughly 3,500 - 4,000 tokens. 
-BATCH_SIZE_CHARS = 15000 
-# New: Overlap for splitting large docs (Split Brain Fix)
-OVERLAP_CHARS = 1000 
-
-# --- PYDANTIC MODELS ---
-
-class ExtractionGoal(BaseModel):
-    """Generated by the Architect to guide the Map Agents."""
-    goal_description: str = Field(description="Specific instructions on what information to extract.")
-    keywords: List[str] = Field(description="List of specific keywords or entities to look for.")
-
-class DocumentFact(BaseModel):
-    """The output of a Map Agent reading a single document."""
-    doc_id: str = Field(description="The exact Bates Identity or PK provided in the document header.")
-    has_relevant_info: bool = Field(description="True if the document contains info relevant to the goal.")
-    relevant_quotes: List[str] = Field(description="Direct quotes from the text supporting the facts.")
-    extracted_summary: str = Field(description="A concise summary of the relevant information found.")
-
-class BatchExtractionResult(BaseModel):
-    """Wrapper to handle multiple document extractions in one pass."""
-    results: List[DocumentFact] = Field(description="List of extraction results, one for each document in the batch.")
-
-# --- THE ENGINE CLASS ---
-
-class MapReduceEngine:
-    # --- PROMPT TEMPLATES ---
-    ARCHITECT_PROMPT_TEMPLATE = """You are an Expert Legal Analyst. 
-    User Query: {query}
-    
-    Create a specific 'Extraction Goal' for junior analysts.
-    If the user asks about specific details (dates, names, colors), explicitly include them in keywords.
-    
-    Your response must be a single valid JSON object strictly matching the schema.
-    
-    {format_instructions}
-    """
-
-    MAP_PROMPT_TEMPLATE = """You are a Fact Extraction Agent analyzing a batch of documents.
-    
-    GOAL: {goal_description}
-    KEYWORDS: {keywords}
-    
-    Analyze the following documents. For EACH document, create an extraction result.
-    Always use the exact DOCUMENT ID provided in the header.
-    
-    BATCH CONTENT:
-    {content}
-    
-    Output strictly valid JSON.
-    
-    {format_instructions}
-    """
-
-    REDUCE_PROMPT_TEMPLATE = """You are a Lead Investigator.
-    Answer the user's question using ONLY the provided facts.
-    Cite your sources using the [Source ID] format.
-    
-    User Question: {query}
-    
-    Extracted Facts:
-    {context}
-    """
-
-    def __init__(self, api_key: str, model_small: str = "mistral-small", model_large: str = "mistral-medium"):
-        self.api_key = api_key
-        self.llm_map = ChatMistralAI(model=model_small, api_key=api_key, temperature=0.0)
-        self.llm_reduce = ChatMistralAI(model=model_large, api_key=api_key, temperature=0.0)
-        self.execution_logs: List[Dict[str, Any]] = []
-
-    def get_schemas(self) -> Dict[str, Any]:
-        """Returns the JSON schemas for the Pydantic models used."""
-        return {
-            "ExtractionGoal": ExtractionGoal.model_json_schema(),
-            "DocumentFact": DocumentFact.model_json_schema(),
-            "BatchExtractionResult": BatchExtractionResult.model_json_schema()
-        }
-
-    def _log_step(self, step_name: str, prompt_content: str, result_summary: str = ""):
-        """Internal helper to log execution details."""
-        self.execution_logs.append({
-            "step": step_name,
-            "prompt": prompt_content,
-            "result": result_summary
-        })
-
-    def estimate_strategy(self, docs_content: List[str]) -> str:
-        total_chars = sum(len(d) for d in docs_content if d)
-        if total_chars < TOKEN_THRESHOLD_CHARS:
-            return "DIRECT"
-        return "MAP_REDUCE"
-
-    def architect_query(self, user_query: str) -> ExtractionGoal:
-        parser = PydanticOutputParser(pydantic_object=ExtractionGoal)
-        prompt = ChatPromptTemplate.from_template(self.ARCHITECT_PROMPT_TEMPLATE)
-        
-        format_instructions = parser.get_format_instructions()
-        formatted_prompt = prompt.format(query=user_query, format_instructions=format_instructions)
-        self._log_step("Architect", formatted_prompt)
-
-        chain = prompt | self.llm_reduce | parser
-        try:
-            return chain.invoke({"query": user_query, "format_instructions": format_instructions})
-        except Exception as e:
-            print(f"Architect JSON parsing failed: {e}. Using fallback.")
-            return ExtractionGoal(
-                goal_description=f"Extract all information relevant to the user query: {user_query}",
-                keywords=[]
-            )
-
-    def _create_batches(self, docs: List[dict]) -> Tuple[List[List[dict]], Dict[str, int]]:
-        """
-        Smart Batching with Proactive Splitting.
-        Returns:
-            Tuple[List[Batches], Dict[Stats]]
-        """
-        batches = []
-        current_batch = []
-        current_chars = 0
-        
-        # Stats counters
-        stats = {
-            "split_doc_count": 0,    # How many ORIGINAL docs were too big
-            "total_split_chunks": 0  # How many chunks they created
-        }
-        
-        for doc in docs:
-            doc_body = doc.get('Body', '')
-            doc_len = len(doc_body)
-            doc_id = doc.get('Bates_Identity', 'Unknown')
-
-            # Proactive Splitting Logic
-            if doc_len > BATCH_SIZE_CHARS:
-                stats["split_doc_count"] += 1
-                
-                # 1. Flush current batch if it exists
-                if current_batch:
-                    batches.append(current_batch)
-                    current_batch = []
-                    current_chars = 0
-                
-                # 2. Chunking loop
-                start = 0
-                chunks_created_for_this_doc = 0
-                while start < doc_len:
-                    end = min(start + BATCH_SIZE_CHARS, doc_len)
-                    chunk_text = doc_body[start:end]
-                    
-                    chunk_doc = {
-                        "Bates_Identity": doc_id, 
-                        "Body": chunk_text
-                    }
-                    batches.append([chunk_doc]) # Giant docs get their own batch
-                    chunks_created_for_this_doc += 1
-                    
-                    if end == doc_len:
-                        break
-                    
-                    start = end - OVERLAP_CHARS
-                
-                stats["total_split_chunks"] += chunks_created_for_this_doc
-                    
-            # Standard Batching Logic
-            elif current_batch and (current_chars + doc_len > BATCH_SIZE_CHARS):
-                batches.append(current_batch)
-                current_batch = [doc]
-                current_chars = doc_len
-            else:
-                current_batch.append(doc)
-                current_chars += doc_len
-        
-        if current_batch:
-            batches.append(current_batch)
-            
-        return batches, stats
-
-    def map_document_batch(self, batch_docs: List[dict], goal: ExtractionGoal) -> List[DocumentFact]:
-        parser = PydanticOutputParser(pydantic_object=BatchExtractionResult)
-        
-        batch_context = ""
-        doc_ids_in_batch = []
-        for d in batch_docs:
-            d_id = d.get('Bates_Identity', 'Unknown')
-            d_body = d.get('Body', '') 
-            doc_ids_in_batch.append(d_id)
-            batch_context += f"--- DOCUMENT ID: {d_id} ---\n{d_body}\n\n"
-
-        prompt = ChatPromptTemplate.from_template(self.MAP_PROMPT_TEMPLATE)
-        
-        format_instructions = parser.get_format_instructions()
-        formatted_prompt = prompt.format(
-            goal_description=goal.goal_description,
-            keywords=", ".join(goal.keywords),
-            content=batch_context,
-            format_instructions=format_instructions
-        )
-        
-        log_view = formatted_prompt.replace(batch_context, f"[BATCH CONTENT HIDDEN ({len(batch_context)} chars)]")
-        self._log_step("Map Agent (Batch)", log_view)
-
-        chain = prompt | self.llm_map | parser
-        try:
-            result = chain.invoke({
-                "goal_description": goal.goal_description,
-                "keywords": ", ".join(goal.keywords),
-                "content": batch_context,
-                "format_instructions": format_instructions
-            })
-            
-            valid_results = []
-            for item in result.results:
-                valid_results.append(item)
-                
-            return valid_results
-            
-        except Exception as e:
-            return [DocumentFact(doc_id=d, has_relevant_info=False, relevant_quotes=[], extracted_summary=f"Error: {str(e)}") for d in doc_ids_in_batch]
-
-    def reduce_facts(self, facts: List[DocumentFact], user_query: str) -> str:
-        """The Reduce Worker: Synthesizes final answer."""
-        relevant_facts = [f for f in facts if f.has_relevant_info]
-        
-        if not relevant_facts:
-            return "I analyzed the documents but found no relevant specific information matching your criteria."
-
-        # Citation Clutter Fix (Aggregation)
-        merged_facts: Dict[str, Dict] = {} 
-        
-        for f in relevant_facts:
-            if f.doc_id not in merged_facts:
-                merged_facts[f.doc_id] = {"summary": [], "quotes": []}
-            
-            if f.extracted_summary:
-                merged_facts[f.doc_id]["summary"].append(f.extracted_summary)
-            if f.relevant_quotes:
-                merged_facts[f.doc_id]["quotes"].extend(f.relevant_quotes)
-        
-        context_str = ""
-        for doc_id, data in merged_facts.items():
-            combined_summary = " ".join(data["summary"])
-            combined_quotes = data["quotes"]
-            context_str += f"Source ({doc_id}): {combined_summary}\nQuotes: {combined_quotes}\n---\n"
-            
-        prompt = ChatPromptTemplate.from_template(self.REDUCE_PROMPT_TEMPLATE)
-        formatted_prompt = prompt.format(query=user_query, context=context_str)
-        self._log_step("Reduce/Synthesis", formatted_prompt)
-
-        chain = prompt | self.llm_reduce
-        return chain.invoke({"query": user_query, "context": context_str}).content
-
-    def run_parallel_map(self, docs: List[dict], goal: ExtractionGoal, status_container=None) -> List[DocumentFact]:
-        self.execution_logs = [] 
-        
-        # --- CHANGE: Unpack stats to improve transparency ---
-        batches, stats = self._create_batches(docs)
-        
-        if status_container:
-            msg = f"📦 Optimized {len(docs)} documents into {len(batches)} processing batches."
-            
-            # Detailed breakdown if splitting occurred
-            if stats["split_doc_count"] > 0:
-                msg += f"\n\nℹ️ **Detailed Breakdown:**\n" \
-                       f"- {stats['split_doc_count']} large documents exceeded the safety limit.\n" \
-                       f"- They were automatically split into {stats['total_split_chunks']} overlapping parts to ensure no data loss."
-            
-            status_container.write(msg)
-        
-        all_results = []
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            future_to_batch = {
-                executor.submit(self.map_document_batch, batch, goal): batch 
-                for batch in batches
-            }
-            
-            completed_batches = 0
-            for future in concurrent.futures.as_completed(future_to_batch):
-                completed_batches += 1
-                try:
-                    batch_results = future.result()
-                    all_results.extend(batch_results)
-                    if status_container:
-                        status_container.update(label=f"Processed batch {completed_batches}/{len(batches)}...", state="running")
-                except Exception as e:
-                    print(f"Batch failed: {e}")
-        
-        # --- CHANGE: Fix the "found relevant info" count logic ---
-        # We need to count Unique Document IDs, not chunks.
-        unique_doc_ids_with_info = set()
-        for f in all_results:
-            if f.has_relevant_info:
-                unique_doc_ids_with_info.add(f.doc_id)
-
-        if status_container:
-            status_container.write(f"✅ Extraction complete. Found relevant info in {len(unique_doc_ids_with_info)} unique documents (processed {len(all_results)} total fragments).")
-            
-        return all_results
-
-##########################
-# --- MAIN NAVIGATION ---
-#########################
 THEME = {
     "bg_base": "#09090b",       # Zinc-950 (was #0E1117)
     "bg_panel": "#18181b",      # Zinc-900 (was #1F2129)
@@ -2774,9 +2693,9 @@ def inject_custom_css():
     
 accent_line = "<hr style='border: 2px solid #3f3f46; opacity: 0.5; margin-top: 15px; margin-bottom: 15px;'>"
 
-def set_page(page_name):
-    """Helper to update the current page in session state."""
-    st.session_state.current_page = page_name
+###############################################
+# --- MAIN ---
+###############################################
 
 def main():
     # 1. Setup & Styling
@@ -2865,8 +2784,6 @@ def main():
                   on_click=set_page, args=("Analysis",))
             
 
-
-
 ### RELATIONSHIP DEFINITONS ##
 RELATIONSHIP_DEFINITIONS= {
     "ABILITY": "Refers to the functional capacity or practical feasibility of an entity to perform a specific task. It highlights the availability of space, time, or technical resources required to meet an objective. (Example: Confirming a building has 'plenty of room' for equipment or determining if a person 'can get there' for a scheduled event.)",
@@ -2926,9 +2843,7 @@ RELATIONSHIP_DEFINITIONS= {
     "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities.",
     "MENTIONED_IN": "In which document is the entity mentioned. CTRL+F"
 }
-def get_rel_definition(rel_name):
-    """Helper to safely get a definition or a default prompt."""
-    return RELATIONSHIP_DEFINITIONS.get(rel_name, "Relationship connection between entities.")
+
 
 WELCOME_TEXT="""
 Terms of Use and Legal Disclaimer
