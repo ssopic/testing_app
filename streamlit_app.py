@@ -852,10 +852,14 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         rel_types = [item['name'] for item in active_items]
         formatted_rels = json.dumps(rel_types)
         
+        # In Connections view, the first UI dropdown (selected_edges) acts as the Source filter 
+        # if selected_sources isn't explicitly defined.
+        actual_sources = selected_sources if len(selected_sources) > 0 else selected_edges
+        
         # Added filtering logic to check both labels and specific node names (n.name / m.name)
         source_filter = ""
-        if len(selected_sources) > 0:
-            formatted_sources = json.dumps(selected_sources)
+        if len(actual_sources) > 0:
+            formatted_sources = json.dumps(actual_sources)
             source_filter = f"\n      AND (any(label IN labels(n) WHERE label IN {formatted_sources}) OR n.name IN {formatted_sources})"
             
         target_filter = ""
@@ -915,6 +919,7 @@ def generate_cart_cypher(active_items, selector_type, selected_edges=None, selec
         collect(coalesce(r.source_pks, m.doc_id)) AS id_list
     """
         return cypher
+
 
     
 # ==========================================
