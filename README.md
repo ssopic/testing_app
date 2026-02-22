@@ -21,7 +21,7 @@ This application transforms unstructured public records into a queryable knowled
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 * **UI/UX**: [Streamlit](https://streamlit.io/) (Custom "Industrial Cockpit" Theme)
 * **Graph Database**: [Neo4j](https://neo4j.com/)
@@ -32,7 +32,7 @@ This application transforms unstructured public records into a queryable knowled
 
 ---
 
-## ⚙️ Setup & Installation
+## Setup & Installation
 
 ### Prerequisites
 * A Neo4j instance (AuraDB or Local)
@@ -66,8 +66,11 @@ NEO4J_PASSWORD = "your_password"
 
 ---
 
-## ⚖️ Legal Disclaimer
+## Legal Disclaimer
 This tool is for educational and portfolio purposes. It processes data from public government releases (e.g., House Oversight Committee). Users must be 18+ and are responsible for verifying all AI-generated findings against original source documents.
 
-## 📄 License
-This project is licensed under the MIT License - see the LICENSE file for details.
+## License & Attribution
+This project is provided for educational and portfolio purposes. 
+
+**Attribution Required:** You are free to use, modify, and distribute this software, provided that you give appropriate credit to the original author, include a link to the original repository, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the author endorses you or your use.
+
