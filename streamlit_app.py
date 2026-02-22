@@ -683,12 +683,55 @@ def render_explorer_workspace(selector_type, selected_items):
             )
             
             # Append the declarative logic to the cart rather than just the dataframe snapshot
-            st.session_state.evidence_cart.append({
-                "source": "Manual Analysis",
-                "cypher": cypher,
-                "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
-            })
-            st.success("Evidence query successfully added to cart!")
+            unique_ids = set()
+            driver = get_db_driver()
+            if driver and cypher:
+                try:
+                    with driver.session() as session:
+                        result = session.run(cypher)
+                        for rec in result:
+                            if rec.get('id_list'):
+                                for item in rec['id_list']:
+                                    if isinstance(item, list):
+                                        unique_ids.update(item)
+                                    elif item is not None:
+                                        unique_ids.add(item)
+                except Exception as e:
+                    st.error(f"Error executing Cypher for payload: {e}")
+        
+            if not unique_ids:
+                st.error("No documents to add based on current filters.")
+            else:
+                names = [item['name'] for item in st.session_state.active_explorer_items]
+                
+                # Build the payload description based on selection count
+                if len(names) > 1:
+                    name_str = f"Entities: {', '.join(names)}"
+                elif len(names) == 1:
+                    name_str = names[0]
+                else:
+                    name_str = "Unknown"
+                    
+                query_desc = f"Manual Explorer: {name_str}"
+                
+                # Construct the exact payload schema requested, including the new Cypher string
+                payload = {
+                    "query": query_desc,
+                    "answer": f"Visual discovery found {len(unique_ids)} related documents.",
+                    "ids": [str(uid) for uid in unique_ids],
+                    "cypher": cypher 
+                }
+                
+                # Safely initialize the app_state and evidence_locker if they don't exist
+                if "app_state" not in st.session_state:
+                    st.session_state.app_state = {}
+                    
+                if "evidence_locker" not in st.session_state.app_state:
+                    st.session_state.app_state["evidence_locker"] = []
+                    
+                # Append payload and toast success
+                st.session_state.app_state["evidence_locker"].append(payload)
+                st.toast(f"✅ Added {len(unique_ids)} docs to Evidence Cart!")
         st.divider()
         with st.expander("🧪 TEST MODE: Verify Cypher Generation Parity", expanded=False):
             st.write("Click below to test if the generated Cypher retrieves the expected data based on the current filters.")
