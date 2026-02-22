@@ -675,6 +675,16 @@ def render_explorer_workspace(selector_type, selected_items):
         st.markdown(accent_line, unsafe_allow_html=True)
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         if st.button("Add Evidence to Cart", type="primary"):
+                # Safely retrieve filters (they might not be defined if the user is in the "Connections" view)
+            try:
+                edges_to_pass = selected_edges
+            except NameError:
+                edges_to_pass = []
+                
+            try:
+                targets_to_pass = selected_targets
+            except NameError:
+                targets_to_pass = []
             # Generate the dynamic Cypher based on current UI state
             cypher = generate_cart_cypher(
                 st.session_state.active_explorer_items, 
