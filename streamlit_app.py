@@ -20,6 +20,8 @@ from langsmith.run_helpers import get_current_run_tree
 import plotly.express as px
 import urllib.parse
 
+# testing some items with defaultdict
+from collections import defaultdict
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
