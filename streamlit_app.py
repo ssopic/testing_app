@@ -202,7 +202,6 @@ def fetch_sunburst_from_db(selector_type: str, label: str, names: list[str]) -> 
                 query = f"""
                 MATCH (n:`{label}`)-[r]->(m)
                 WHERE n.name IN $names
-                    AND type(r) <> 'MENTIONED_IN'
                 RETURN 
                     type(r) as edge, 
                     labels(n)[0] as node, 
