@@ -806,7 +806,7 @@ def generate_cart_cypher(active_items, selected_edges, selected_targets):
     # Using json.dumps to format lists of strings correctly for Cypher (e.g., ["A", "B"])
     for label, names in label_groups.items():
         formatted_names = json.dumps(names)
-        source_clauses.append(f"(n:`{label}` AND n.id IN {formatted_names})")
+        source_clauses.append(f"(n:`{label}` AND n.name IN {formatted_names})")
 
     source_where = " OR ".join(source_clauses)
 
