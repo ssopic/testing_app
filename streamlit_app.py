@@ -1880,7 +1880,8 @@ def screen_extraction():
                     payload = {
                         "query": f"Manual Cypher: {st.session_state.manual_query_text[:30]}...",
                         "answer": "Manually executed Cypher query results.",
-                        "ids": found_ids
+                        "ids": found_ids,
+                        "cypher": cypher
                     }
                     st.session_state.app_state["evidence_locker"].append(payload)
                     st.toast(f"Saved {len(found_ids)} IDs to Locker!")
