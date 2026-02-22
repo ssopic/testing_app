@@ -932,7 +932,7 @@ def screen_databook():
             selector_type = st.radio(
                 "Analysis Mode", 
                 ["Entities", "Connections", "Text Mentions"], 
-                captions=["Semantic (Node)", "Semantic (Verb)", "Lexical (Node)"],
+                captions=["Directed", "Directed", "Entity mentioned in Document"],
                 horizontal=True
             )
             
