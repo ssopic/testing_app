@@ -1783,7 +1783,7 @@ def screen_extraction():
                         
                         if result.get("proof_ids"):
                             st.session_state.app_state["evidence_locker"].append({
-                                "query": user_msg, "answer": ans, "ids": result["proof_ids"]
+                                "query": user_msg, "answer": ans, "ids": result["proof_ids"], "cypher": result["cypher_query"]
                             })
                             st.toast("Evidence saved to locker")
 
@@ -1835,7 +1835,7 @@ def screen_extraction():
             if st.button("💾 Add Results to Locker"):
                 if found_ids:
                     payload = {
-                        "query": f"Manual Cypher: {st.session_state.manual_query_text[:30]}...",
+                        "query": f"Manual Cypher: {st.session_state.manual_query_text}",
                         "answer": "Manually executed Cypher query results.",
                         "ids": found_ids
                     }
