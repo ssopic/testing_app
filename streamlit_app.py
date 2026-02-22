@@ -1750,6 +1750,7 @@ def screen_extraction():
         # Chat UI: Iterate over chat_history in app_state
         for chat in st.session_state.app_state["chat_history"]:
             with st.chat_message(chat["role"]): st.write(chat["content"])
+        st.caption("*NOTE: The evidence output might have ordering issues. In example getting paid and paying for something might be reversed. *")
 
         user_msg = st.chat_input("Ask about the graph...")
         if user_msg:
