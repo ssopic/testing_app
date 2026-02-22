@@ -1218,7 +1218,8 @@ class SynthesisOutput(BaseModel):
 class CypherWrapper(BaseModel):
     query: str
 
-# --- SYSTEM PROMPTS (Preserved) ---
+# --- SYSTEM PROMPTS  ---
+
 
 SYSTEM_PROMPTS = {
   "Intent Planner": """
@@ -1322,7 +1323,8 @@ RULES:
 
 3. STRICT ATTRIBUTE FILTERING (CRITICAL):
    - **TARGET NODES ONLY:** You may ONLY apply name filters to nodes labeled `PERSON`. Do NOT filter `LOCATION`, `ORGANIZATION`, etc. by name (map them to Labels instead).
-   - **FUZZY MATCHING REQUIRED:** When filtering properties, you MUST use `toLower(n.prop) CONTAINS 'value'`.
+   - **FALLBACK FOR NON-PERSONS:** If the user asks for a specific organization like 'Project Omega', map it to the `ORGANIZATION` label but DO NOT add a `WHERE` clause for its name. The Synthesizer will filter the results post-query.
+   - **FUZZY MATCHING REQUIRED:** When filtering PERSON properties, you MUST use `toLower(n.prop) CONTAINS 'value'`.
      * FORBIDDEN: Do NOT use strict equality (`=`).
      * BAD: `WHERE n.name = 'John'`
      * GOOD: `WHERE toLower(n.name) CONTAINS 'john'`
@@ -1343,25 +1345,51 @@ CONSTRAINT RULE: Do NOT use properties in the WHERE clause that are not listed i
 You are an expert Cypher Generator. Convert the Grounded Component into a VALID, READ-ONLY Cypher query.
 
 RULES:
-1. SAFE RETURN POLICY (STRICT):
-   - For NODES: You MUST ONLY return the `.name` property (e.g., `n.name`).
-   - DO NOT return generic properties like `.title`, `.age`, `.role` even if the user asks, as they are unreliable.
-   - For PROVENANCE: Always return `coalesce(r.source_pks, r.doc_id)`.
+1. STRICT VARIABLE NAMING (MANDATORY):
+   - Always use `n` for the source/starting node.
+   - Always use `r` for the primary relationship.
+   - Always use `m` for the target/destination node.
+   - Always use `d` if matching a Document node.
 
-2. STRING MATCHING (MANDATORY): For ALL string property filters in WHERE clauses, you MUST use `toLower(n.prop) CONTAINS 'value'`.
+2. SAFE RETURN POLICY (STRICT):
+   - For NODES: You MUST ONLY return the `.name` property (e.g., `n.name`, `m.name`).
+   - DO NOT return generic properties like `.title`, `.age`, `.role` even if the user asks, as they are unreliable.
+   - For PROVENANCE: Always return `coalesce(r.source_pks, r.doc_id)` to satisfy source requirements.
+
+3. STRING MATCHING (MANDATORY): For ALL string property filters in WHERE clauses, you MUST use `toLower(n.prop) CONTAINS 'value'`.
    - BAD: `WHERE n.name = 'John Doe'`
    - GOOD: `WHERE toLower(n.name) CONTAINS 'john doe'`
    - **NEGATIVE MATCHING:** For exclusion, use `NOT ... CONTAINS`.
      - BAD: `WHERE n.name <> 'Gates'`
      - GOOD: `WHERE NOT toLower(n.name) CONTAINS 'gates'`
 
-3. PATHS & LOGIC:
-   - **Continuous Paths:** Ensure the path is fully connected. `(a)-[r1]->(b)-[r2]->(c)`. NEVER use comma-separated disconnected patterns like `MATCH (a), (b)` (Cartesian Product).
+4. PATHS & LOGIC:
+   - **Continuous Paths:** Ensure the path is fully connected. `(n)-[r1]->(m)-[r2]->(o)`. NEVER use comma-separated disconnected patterns like `MATCH (n), (m)` (Cartesian Product).
    - **OR Logic:** If the Grounding Agent provided pipes `|` in labels (e.g., `Person|Organization`), write them EXACTLY as provided in the Cypher (e.g., `(n:Person|Organization)`).
 
-4. PROPERTIES IN WHERE CLAUSES: You may use other properties (e.g. `.date`, `.status`) ONLY in the `WHERE` clause to filter data, and ONLY if they are explicitly listed in the Schema.
-5. DISTINCT: Always use `RETURN DISTINCT` to avoid duplicates.
-6. SYNTAX: Do not include semicolons at the end.
+5. PROPERTIES IN WHERE CLAUSES: You may use other properties (e.g. `.date`, `.status`) ONLY in the `WHERE` clause to filter data, and ONLY if they are explicitly listed in the Schema.
+6. DISTINCT: Always use `RETURN DISTINCT` to avoid duplicates.
+7. SYNTAX: Do not include semicolons at the end.
+
+EXAMPLES:
+
+Input: 
+  source_node_label="Person", target_node_label="Person"
+  relationship_paths=["FINANCIAL_TRANSACTION"]
+  cypher_constraint_clause="toLower(n.name) CONTAINS 'john doe'"
+Output: 
+  MATCH (n:Person)-[r:FINANCIAL_TRANSACTION]->(m:Person) 
+  WHERE toLower(n.name) CONTAINS 'john doe' 
+  RETURN DISTINCT n.name, type(r), m.name, coalesce(r.source_pks, r.doc_id)
+
+Input: 
+  source_node_label="Person", target_node_label="Organization"
+  relationship_paths=["VISITED"]
+  cypher_constraint_clause="toLower(n.name) CONTAINS 'smith'"
+Output: 
+  MATCH (n:Person)-[r:VISITED]->(m:Organization) 
+  WHERE toLower(n.name) CONTAINS 'smith' 
+  RETURN DISTINCT n.name, type(r), m.name, coalesce(r.source_pks, r.doc_id)
 """,
     "Query Debugger": (
         "You are an expert Neo4j Debugger. Analyze the error, warnings, and the failed query. "
