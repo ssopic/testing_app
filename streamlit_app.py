@@ -674,21 +674,21 @@ def render_explorer_workspace(selector_type, selected_items):
         st.subheader(":arrow_down_small: Add to Evidence Cart :arrow_down_small:", divider="gray")
         if st.button("Add Evidence to Cart", type="primary"):
     # Generate the dynamic Cypher based on current UI state
-        cypher, params = generate_cart_cypher(
-            st.session_state.active_explorer_items, 
-            selected_edges, # Replace with the actual variable holding selected relationships
-            selected_targets # Replace with the actual variable holding selected targets
-        )
+            cypher, params = generate_cart_cypher(
+                st.session_state.active_explorer_items, 
+                selected_edges, # Replace with the actual variable holding selected relationships
+                selected_targets # Replace with the actual variable holding selected targets
+            )
+            
+            # Append the declarative logic to the cart rather than just the dataframe snapshot
+            st.session_state.evidence_cart.append({
+                "source": "Manual Analysis",
+                "cypher": cypher,
+                "params": params,
+                "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
+            })
+            st.success("Evidence query successfully added to cart!")
         
-        # Append the declarative logic to the cart rather than just the dataframe snapshot
-        st.session_state.evidence_cart.append({
-            "source": "Manual Analysis",
-            "cypher": cypher,
-            "params": params,
-            "summary": f"Selected {len(st.session_state.active_explorer_items)} sources, filtered to {len(selected_edges)} relationships."
-        })
-        st.success("Evidence query successfully added to cart!")
-    
     # =====================================================================
     # TESTING BLOCK: Drop this right below the Add to Cart button
     # =====================================================================
