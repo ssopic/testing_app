@@ -784,8 +784,14 @@ def render_explorer_workspace(selector_type, selected_items):
                             st.warning("⚠️ The query ran successfully but found 0 matching paths. Try expanding your edge/target filters.")
         
                         st.write("**Raw Cypher Results:**")
-                        st.dataframe(records)
-                    
+                        display_records = []
+                        for rec in records:
+                            display_rec = rec.copy()
+                            display_rec['id_list'] = str(rec.get('id_list', []))
+                            display_records.append(display_rec)
+                            
+                        st.dataframe(display_records)
+                            
                 except Exception as e:
                     st.error(f"Error executing test Cypher: {e}")
                 
