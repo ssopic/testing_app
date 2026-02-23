@@ -1074,6 +1074,13 @@ import io
 import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
+import re
+import bz2
+import base64
+import io
+import qrcode
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
@@ -1208,7 +1215,7 @@ class SocialQRMaster:
 
         qr = qrcode.QRCode(
             error_correction=ec_level,
-            box_size=10,
+            box_size=1, # <--- FIX: Start at exactly 1 pixel per module
             border=4,
         )
         qr.add_data(payload)
@@ -1284,10 +1291,12 @@ class SocialQRMaster:
         
         # --- FIX: Ensure integer scaling to prevent OpenCV detection failure ---
         # OpenCV fails if modules are unevenly scaled. We lock the size to an exact multiple.
-        total_modules = qr_img.size[0] // 10 # 10 is the box_size
+        # Since box_size is 1, the image size is exactly the total number of modules!
+        total_modules = qr_img.size[0]
         pixels_per_module = max(1, qr_display_size // total_modules)
         optimal_display_size = pixels_per_module * total_modules
         
+        # Because the source image is 1 pixel per module, NEAREST scaling is mathematically perfect.
         qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
 
         # Calculate exactly where the QR code will sit (perfectly centered)
@@ -1354,7 +1363,6 @@ class SocialQRMaster:
 
         print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
         return final_img
-
 
 # ==========================================
 ### 7. SCREENS  ###
