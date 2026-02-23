@@ -163,6 +163,19 @@ def extract_provenance_from_result(result: Union[Dict, List]) -> List[str]:
     recurse(result)
     return list(set(ids))
 
+def get_selected_cypher_queries():
+    """Helper to extract cypher queries from the currently selected locker items."""
+    if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
+        return []
+    selected = st.session_state.app_state.get("selected_ids", set())
+    queries = []
+    for entry in st.session_state.app_state["evidence_locker"]:
+        entry_ids = {str(pid) for pid in entry["ids"]}
+        if entry_ids and entry_ids.issubset(selected):
+            if "cypher" in entry and entry["cypher"]:
+                queries.append(entry["cypher"])
+    return queries
+    
 # --- DESKTOP ONLY ---
 def flatten_ids(container):
     """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
@@ -1515,16 +1528,13 @@ def screen_analysis():
     
     # Ensure data is loaded
     if 'github_data' not in st.session_state:
-        # Assuming load_github_data is available in the main scope or imported
-        # For this file context, we assume it's loaded. 
-        # In real integration, import load_github_data from current.py
         pass 
         
     df = st.session_state.github_data
     matched = df[df['PK'].isin(ids)]
     st.subheader(f"Analyzing {len(matched)} Documents")
 
-    # 2. Document Reader (Preserved from original)
+    # 2. Document Reader
     doc_options = matched['Bates_Identity'].tolist()
     selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
     
@@ -1538,7 +1548,16 @@ def screen_analysis():
     st.divider()
     st.write("### Agentic Analysis")
     
+    # --- NEW: Check for auto-triggered question from QR Import ---
+    auto_q = st.session_state.pop("auto_trigger_question", None)
+    
     q = st.chat_input("Ask about this evidence set:")
+    
+    # Override 'q' if we have an auto-trigger
+    if auto_q:
+        q = auto_q
+        with st.chat_message("user"): 
+            st.write(f"*(Auto-Triggered from QR)*: {q}")
     
     if q:
         api_key = st.session_state.app_state.get("mistral_key", "")
@@ -1547,9 +1566,7 @@ def screen_analysis():
             return
 
         # Initialize Engine
-        # We instantiate here. In production, we might cache this object, 
-        # but for now, it's lightweight.
-        engine = MapReduceEngine(api_key=api_key)
+        engine = MapReduceEngine(api_key=api_key) # Assuming MapReduceEngine is in scope
         
         # Prepare Docs for the Engine
         docs_payload = []
@@ -1560,8 +1577,6 @@ def screen_analysis():
             })
 
         # --- THE PIPELINE UI ---
-        
-        # We use st.status to give the user that "constant change" feedback
         with st.status("Initializing Agent Swarm...", expanded=True) as status:
             
             # Step A: The Gatekeeper
@@ -1569,12 +1584,9 @@ def screen_analysis():
             st.write(f"🧠 Gatekeeper Decision: **{strategy}** Mode")
             
             if strategy == "DIRECT":
-                # Fallback to simple logic for small context
                 status.update(label="Running Direct Analysis...", state="running")
-                # Simple concatenation
                 context = "\n".join([f"Doc: {d['Bates_Identity']}\n{d['Body']}" for d in docs_payload])
                 
-                # Use the 'reduce' llm for a direct answer
                 from langchain_core.prompts import ChatPromptTemplate
                 prompt = ChatPromptTemplate.from_template("Context: {context}\n\nQuestion: {q}")
                 chain = prompt | engine.llm_reduce
@@ -1584,32 +1596,26 @@ def screen_analysis():
 
             else:
                 # MAP-REDUCE STRATEGY
-                
-                # Step B: The Architect
                 status.write("🏗️ Architect is analyzing your question...")
                 extraction_goal = engine.architect_query(q)
                 status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
                 
-                # Step C: Parallel Map
                 status.update(label="Agents are scanning documents...", state="running")
                 status.write(f"🚀 Spawning {len(docs_payload)} extraction agents...")
                 
-                # This function updates the status label as it runs
                 facts = engine.run_parallel_map(docs_payload, extraction_goal, status_container=status)
                 
                 relevant_count = sum(1 for f in facts if f.has_relevant_info)
                 status.write(f"✅ Extraction complete. Found relevant info in {relevant_count} documents.")
                 
-                # Step D: Reduce
                 status.update(label="Synthesizing Final Answer...", state="running")
                 final_answer = engine.reduce_facts(facts, q)
                 status.update(label="Analysis Complete", state="complete", expanded=False)
 
-        # 4. Display Result
+        # 4. Display Result & QR Generation
         if final_answer:
             st.info(final_answer)
             
-            # Optional: Show citations/sources if in Map-Reduce mode
             if strategy == "MAP_REDUCE" and 'facts' in locals():
                 with st.expander("View Source Citations"):
                     for f in facts:
@@ -1619,7 +1625,25 @@ def screen_analysis():
                             for quote in f.relevant_quotes:
                                 st.text(f"\"{quote}\"")
                             st.divider()
-
+            
+            # --- NEW: QR Generation ---
+            st.divider()
+            if st.button("🔗 Generate Shareable QR Code"):
+                queries = get_selected_cypher_queries()
+                if queries:
+                    try:
+                        with st.spinner("Generating secure QR code..."):
+                            qr_master = SocialQRMaster()
+                            # Use the user's question 'q' as the instruction
+                            qr_img = qr_master.generate(queries=queries, title="Graph Analysis", instruction=q)
+                            
+                            buf = io.BytesIO()
+                            qr_img.save(buf, format="PNG")
+                            st.image(buf.getvalue(), caption="Scan to import this analysis")
+                    except Exception as e:
+                        st.error(f"Failed to generate QR: {e}")
+                else:
+                    st.warning("No Cypher queries found in the selected evidence to share.")
 # --- DESKTOP ---
 
 @st.fragment
