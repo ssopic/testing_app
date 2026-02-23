@@ -1074,6 +1074,8 @@ import io
 import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
+
+
 import re
 import bz2
 import base64
@@ -1152,39 +1154,61 @@ class SocialQRMaster:
 
     # --- SECTION C: RAM-OPTIMIZED VERIFICATION ---
 
-    def _verify_readability(self, pil_img, original_data):
+    def _verify_readability(self, pil_img, original_data, fallback_qr=None):
         """Simulates social media destruction and attempts to read the code."""
         import cv2
         import numpy as np
 
-        # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1000px short side)
-        target_short_side = 1000
-        w, h = pil_img.size
+        def run_test(img_to_test):
+            # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1500px short side)
+            target_short_side = 1500
+            w, h = img_to_test.size
 
-        if min(w, h) > target_short_side:
-            ratio = target_short_side / min(w, h)
-            new_size = (int(w * ratio), int(h * ratio))
-            small_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
-        else:
-            small_img = pil_img
+            if min(w, h) > target_short_side:
+                ratio = target_short_side / min(w, h)
+                new_size = (int(w * ratio), int(h * ratio))
+                small_img = img_to_test.resize(new_size, Image.Resampling.LANCZOS)
+            else:
+                small_img = img_to_test
 
-        # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
-        buffer = io.BytesIO()
-        small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
-        buffer.seek(0)
+            # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
+            buffer = io.BytesIO()
+            small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+            buffer.seek(0)
 
-        # 3. Decode with OpenCV
-        file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
-        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            # 3. Decode with OpenCV
+            file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
+            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-        detector = cv2.QRCodeDetector()
-        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(cv_img)
+            detector = cv2.QRCodeDetector()
+            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(cv_img)
 
-        # 4. Validate Data Integrity
-        if retval:
-            for info in decoded_info:
-                if info == original_data:
-                    return True
+            # 4. Validate Data Integrity
+            if retval and decoded_info:
+                for info in decoded_info:
+                    if info == original_data:
+                        return True
+                        
+            # 5. OpenCV is brittle with text/compression. Try a grayscale threshold fallback.
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(thresh)
+            if retval and decoded_info:
+                for info in decoded_info:
+                    if info == original_data:
+                        return True
+            return False
+
+        # Try testing the full layout first
+        if run_test(pil_img):
+            return True
+            
+        # If OpenCV is confused by the surrounding layout/text, test just the crisp QR code
+        # to ensure the data density successfully survives JPEG compression.
+        if fallback_qr is not None:
+            if run_test(fallback_qr):
+                return True
+                
         return False
 
     # --- MAIN GENERATOR ---
@@ -1348,7 +1372,7 @@ class SocialQRMaster:
                   app_address, fill=text_color, font=footer_font)
 
         # Step 5: THE GAUNTLET (Verification with Smart Error Messaging)
-        if not self._verify_readability(final_img, payload):
+        if not self._verify_readability(final_img, payload, fallback_qr=qr_resized):
              if len(payload) > 500:
                  raise ValueError(
                     f"Quality Check Failed: Too much data ({len(payload)} chars compressed). "
@@ -1363,6 +1387,7 @@ class SocialQRMaster:
 
         print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
         return final_img
+                     
 
 # ==========================================
 ### 7. SCREENS  ###
