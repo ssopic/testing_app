@@ -1682,7 +1682,7 @@ def screen_analysis():
                     st.markdown(f"**Query {idx + 1}**")
                     st.code(qry, language="cypher")
                     st.divider()
-                    st.code(analysis_data["q"]
+                    st.code(analysis_data["q"])
 
             if queries:
                 try:
