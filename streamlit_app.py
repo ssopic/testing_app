@@ -1681,6 +1681,8 @@ def screen_analysis():
                 for idx, qry in enumerate(queries):
                     st.markdown(f"**Query {idx + 1}**")
                     st.code(qry, language="cypher")
+                    st.divider()
+                    st.code(analysis_data["q"]
 
             if queries:
                 try:
