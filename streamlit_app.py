@@ -85,7 +85,7 @@ def init_app():
     if st.session_state.get("has_tried_login", False):
         return
     if 'github_data' not in st.session_state:
-    st.session_state.github_data = load_github_data()
+        st.session_state.github_data = load_github_data()
 
     if "app_state" not in st.session_state:
         st.session_state.app_state = {
