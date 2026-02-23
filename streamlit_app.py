@@ -26,6 +26,11 @@ from langchain_core.output_parsers import PydanticOutputParser
 import plotly.express as px
 import urllib.parse
 
+# ---Imports for QR code reading and generation ---
+import base64, bz2, io, qrcode, cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
 # It ensures the library picks up the config before the @traceable decorators run.
@@ -1046,7 +1051,293 @@ class MapReduceEngine:
 
 
 # ==========================================
-### 6. SCREENS  ###
+### 6. QR code generator and reader  ###
+# ==========================================
+
+import re
+import bz2
+import base64
+import io
+import qrcode
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+
+class SocialQRMaster:
+    """
+    The complete engine for generating Secure, Social-Media-Ready,
+    and Verified QR Codes for Neo4j AuraDB.
+    """
+
+    def __init__(self):
+        # 1. Security Filter (Read-Only)
+        self.unsafe_pattern = re.compile(
+            r'\b(CREATE|DELETE|SET|MERGE|REMOVE|DETACH|DROP|LOAD CSV|CALL)\b',
+            re.IGNORECASE
+        )
+
+    # --- SECTION A: SECURITY & COMPRESSION ---
+
+    def _validate_safety(self, query):
+        """Ensure query is Read-Only."""
+        if self.unsafe_pattern.search(query):
+            raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query[:30]}...")
+        return True
+
+    def _compress_payload(self, queries, instruction=None):
+        """
+        Structure: Instruction + "||SEP||" + Queries
+        Minify -> Join -> Bz2 -> Base64
+        """
+        cleaned_queries = [q.strip() for q in queries]
+        queries_joined = "|||".join(cleaned_queries)
+        text_part = instruction.strip() if instruction else ""
+
+        full_payload = f"{text_part}||SEP||{queries_joined}"
+        compressed = bz2.compress(full_payload.encode('utf-8'), compresslevel=9)
+        return base64.b64encode(compressed).decode('utf-8')
+
+    @staticmethod
+    def extract_payload(encoded_payload):
+        """Static Helper: Decodes the QR payload back into (instruction, queries)."""
+        try:
+            compressed = base64.b64decode(encoded_payload)
+            full_string = bz2.decompress(compressed).decode('utf-8')
+            parts = full_string.split("||SEP||", 1)
+
+            if len(parts) != 2:
+                return None, full_string.split("|||")
+
+            desc_text, queries_str = parts
+            instruction = desc_text if desc_text else None
+            queries = queries_str.split("|||")
+            return instruction, queries
+        except Exception:
+            return None, []
+
+    # --- SECTION B: COLOR SAFETY ---
+
+    def _check_contrast(self, fill_hex, back_hex):
+        """Calculates luminance to ensure scanner readability."""
+        def get_lum(hex_code):
+            rgb = ImageColor.getrgb(hex_code)
+            return (0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]) / 255.0
+
+        lum_fill = get_lum(fill_hex)
+        lum_back = get_lum(back_hex)
+
+        if lum_fill > lum_back:
+            return False, "INVERTED: Dots must be darker than background."
+        if (lum_back - lum_fill) < 0.4:
+            return False, "LOW CONTRAST: Colors are too similar."
+        return True, "OK"
+
+    # --- SECTION C: RAM-OPTIMIZED VERIFICATION ---
+
+    def _verify_readability(self, pil_img, original_data):
+        """Simulates social media destruction and attempts to read the code."""
+        import cv2
+        import numpy as np
+
+        # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1000px short side)
+        target_short_side = 1000
+        w, h = pil_img.size
+
+        if min(w, h) > target_short_side:
+            ratio = target_short_side / min(w, h)
+            new_size = (int(w * ratio), int(h * ratio))
+            small_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+        else:
+            small_img = pil_img
+
+        # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
+        buffer = io.BytesIO()
+        small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+        buffer.seek(0)
+
+        # 3. Decode with OpenCV
+        file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
+        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+        detector = cv2.QRCodeDetector()
+        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(cv_img)
+
+        # 4. Validate Data Integrity
+        if retval:
+            for info in decoded_info:
+                if info == original_data:
+                    return True
+        return False
+
+    # --- MAIN GENERATOR ---
+
+    def generate(self, queries, title, instruction=None, fill_color="black", back_color="white",
+                 width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None):
+        """Main entry point. Returns PIL Image or raises ValueError."""
+
+        if len(title) > 30:
+            title = title[:27] + "..."
+
+        for q in queries:
+            self._validate_safety(q)
+
+        is_safe, msg = self._check_contrast(fill_color, back_color)
+        if not is_safe:
+            raise ValueError(f"Color Error: {msg}")
+
+        # Compress Payload
+        payload = self._compress_payload(queries, instruction)
+
+        # ADAPTIVE ERROR CORRECTION:
+        # Step down from 30% redundancy (H) to 25% (Q) for larger payloads.
+        ec_level = qrcode.constants.ERROR_CORRECT_H
+        if len(payload) > 550:
+            ec_level = qrcode.constants.ERROR_CORRECT_Q
+            print("INFO: Large payload detected. Utilizing Adaptive Density (EC Level Q).")
+
+        qr = qrcode.QRCode(
+            error_correction=ec_level,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(payload)
+        qr.make(fit=True)
+
+        qr_img = qr.make_image(fill_color=fill_color, back_color=back_color).convert('RGB')
+        final_img = Image.new('RGB', (width, height), back_color)
+        draw = ImageDraw.Draw(final_img)
+
+        # --- DYNAMIC LAYOUT ---
+        # Fonts need to scale based off of both the width and height as we have difering oens for each social media
+        avg_dim = (width + height) // 2
+
+        # Defnes the sizes of the font compared to the average dimension
+        target_primary_size = int(avg_dim * 0.08)
+        target_secondary_size = int(avg_dim * 0.045)
+        target_footer_size = int(avg_dim * 0.035)
+
+        def get_fitting_font(text, max_size, max_width, is_bold=False):
+            """Returns the largest font possible that fits within max_width, tracking OS fallbacks."""
+            # Cross-platform font fallback list (Windows, Mac, Linux)
+            fonts_to_try = [
+                "arialbd.ttf" if is_bold else "arial.ttf",
+                "Arial Bold.ttf" if is_bold else "Arial.ttf",
+                "DejaVuSans-Bold.ttf" if is_bold else "DejaVuSans.ttf",
+                "LiberationSans-Bold.ttf" if is_bold else "LiberationSans-Regular.ttf"
+            ]
+
+            font = None
+            size = max_size
+            font_path_used = None
+
+            # Find the first scalable font available on the host system
+            for font_name in fonts_to_try:
+                try:
+                    font = ImageFont.truetype(font_name, size)
+                    font_path_used = font_name
+                    break
+                except IOError:
+                    continue
+
+            if font is None:
+                print("WARNING: No scalable fonts found on your system. Text will remain tiny.")
+                return ImageFont.load_default(), max_size
+
+            # Shrink font dynamically until it perfectly fits horizontal bounds
+            while size > 12:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                if text_width <= max_width:
+                    break
+                size -= 2
+                font = ImageFont.truetype(font_path_used, size)
+            return font, size
+
+        # Initialize the fonts here. These depend on the sizes defined above
+        title_font, actual_title_size = get_fitting_font(title, target_secondary_size, width * 0.9, is_bold=False)
+        warning_font, actual_warning_size = get_fitting_font("Don't trust me blindly!", target_primary_size, width * 0.9, is_bold=True)
+        action_font, actual_action_size = get_fitting_font("See For Yourself", target_primary_size, width * 0.9, is_bold=True)
+
+        footer_font, actual_footer_size = get_fitting_font(app_address, target_footer_size, width * 0.6)
+
+        bg_lum = (0.299*ImageColor.getrgb(back_color)[0] + 0.587*ImageColor.getrgb(back_color)[1] + 0.114*ImageColor.getrgb(back_color)[2])
+        text_color = "white" if bg_lum < 128 else "black"
+
+        def draw_centered(text, y, font):
+            bbox = draw.textbbox((0, 0), text, font=font)
+            w = bbox[2] - bbox[0]
+            draw.text(((width - w) // 2, y), text, fill=text_color, font=font)
+
+        # ADAPTIVE SIZING: Cap the height slightly so we always have room for the text above and below
+        qr_display_size = int(min(width * 0.85, height * 0.55))
+        qr_resized = qr_img.resize((qr_display_size, qr_display_size), Image.Resampling.NEAREST)
+
+        # Calculate exactly where the QR code will sit (perfectly centered)
+        qr_y_pos = (height - qr_display_size) // 2
+        qr_x_pos = (width - qr_display_size) // 2
+
+        # Calculate a proportional gap for spacing between the text and the QR code
+        gap = int(min(width, height) * 0.04)
+
+        # --- Draw Header Elements ---
+        # We start just above the QR code and stack upwards to ensure perfect spacing
+        bottom_of_header = qr_y_pos - gap
+
+        # Draw Title right above the QR code
+        title_y = bottom_of_header - actual_title_size
+        draw_centered(title, title_y, title_font)
+        bottom_of_header = title_y - (gap // 2)
+
+        # Draw Warning right above the Title
+        warning_y = bottom_of_header - actual_warning_size
+        draw_centered("Don't trust me blindly!", warning_y, warning_font)
+
+        # Paste QR
+        final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
+
+        # --- Draw Footer Elements ---
+        footer_text_y = qr_y_pos + qr_display_size + gap
+        draw_centered("See For Yourself", footer_text_y, action_font)
+
+        # Add the app footer directly below the previous text
+        footer_y = footer_text_y + actual_action_size + gap
+        logo_size = int(actual_footer_size * 1.5)
+        addr_bbox = draw.textbbox((0, 0), app_address, font=footer_font)
+        addr_width = addr_bbox[2] - addr_bbox[0]
+        total_footer_width = logo_size + 15 + addr_width
+        footer_start_x = (width - total_footer_width) // 2
+
+        if logo_path:
+            try:
+                logo = Image.open(logo_path).convert("RGBA")
+                logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
+                final_img.paste(logo, (footer_start_x, footer_y), logo)
+            except:
+                draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
+        else:
+            draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
+
+        draw.text((footer_start_x + logo_size + 15, footer_y + (logo_size - actual_footer_size)//2),
+                  app_address, fill=text_color, font=footer_font)
+
+        # Step 5: THE GAUNTLET (Verification with Smart Error Messaging)
+        if not self._verify_readability(final_img, payload):
+             if len(payload) > 500:
+                 raise ValueError(
+                    f"Quality Check Failed: Too much data ({len(payload)} chars compressed). "
+                    "The QR code dots are too small to survive social media compression. "
+                    "Please reduce the number of queries or shorten your description."
+                 )
+             else:
+                 raise ValueError(
+                    "Quality Check Failed: This color combination is unreadable "
+                    "by standard scanners. Please use higher contrast colors."
+                 )
+
+        print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
+        return final_img
+
+
+# ==========================================
+### 7. SCREENS  ###
 # ==========================================
 
 # --- SHARED ---
