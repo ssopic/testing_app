@@ -1092,7 +1092,7 @@ class SocialQRMaster:
     def _validate_safety(self, query):
         """Ensure query is Read-Only."""
         if self.unsafe_pattern.search(query):
-            raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query[:30]}...")
+            raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query}...")
         return True
 
     def _compress_payload(self, queries, instruction=None):
@@ -1183,7 +1183,7 @@ class SocialQRMaster:
     # --- MAIN GENERATOR ---
 
     def generate(self, queries, title, instruction=None, fill_color="black", back_color="white",
-                 width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None):
+                 width=1080, height=1080, app_address="silvios.ai", logo_path=None):
         """Main entry point. Returns PIL Image or raises ValueError."""
 
         if len(title) > 30:
@@ -1517,7 +1517,6 @@ def screen_locker():
 
 
 @st.fragment
-@st.fragment
 def screen_analysis():
     st.title("Analysis Pane")
     
@@ -1646,6 +1645,18 @@ def screen_analysis():
         st.divider()
         if st.button("🔗 Generate Shareable QR Code"):
             queries = get_selected_cypher_queries()
+            
+            # --- NEW: Debugging Output to verify payload ---
+            st.info("🔍 Debug: Data extracted for QR Code generation:")
+            st.markdown(f"**Question (Instruction):** {analysis_data.get('q', 'None')}")
+            with st.expander("Extracted Cypher Queries", expanded=True):
+                if not queries:
+                    st.write("No queries found.")
+                for idx, qry in enumerate(queries):
+                    st.markdown(f"**Query {idx + 1}**")
+                    st.code(qry, language="cypher")
+            # -----------------------------------------------
+
             if queries:
                 try:
                     with st.spinner("Generating secure QR code..."):
@@ -1661,7 +1672,6 @@ def screen_analysis():
                     st.error(f"Failed to generate QR: {e}")
             else:
                 st.warning("No Cypher queries found in the selected evidence to share.")
-
 
 # --- DESKTOP ---
 
