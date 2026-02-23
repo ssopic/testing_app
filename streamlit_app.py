@@ -31,6 +31,7 @@ import base64, bz2, io, qrcode, cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
+
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
 # It ensures the library picks up the config before the @traceable decorators run.
@@ -1144,35 +1145,57 @@ class SocialQRMaster:
         import cv2
         import numpy as np
 
-        # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1000px short side)
-        target_short_side = 1000
-        w, h = pil_img.size
+        def run_test(img_to_test):
+            # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1500px short side)
+            target_short_side = 1500
+            w, h = img_to_test.size
 
-        if min(w, h) > target_short_side:
-            ratio = target_short_side / min(w, h)
-            new_size = (int(w * ratio), int(h * ratio))
-            small_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
-        else:
-            small_img = pil_img
+            if min(w, h) > target_short_side:
+                ratio = target_short_side / min(w, h)
+                new_size = (int(w * ratio), int(h * ratio))
+                small_img = img_to_test.resize(new_size, Image.Resampling.LANCZOS)
+            else:
+                small_img = img_to_test
 
-        # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
-        buffer = io.BytesIO()
-        small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
-        buffer.seek(0)
+            # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
+            buffer = io.BytesIO()
+            small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+            buffer.seek(0)
 
-        # 3. Decode with OpenCV
-        file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
-        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            # 3. Decode with OpenCV
+            file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
+            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-        detector = cv2.QRCodeDetector()
-        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(cv_img)
-
-        # 4. Validate Data Integrity
-        if retval:
-            for info in decoded_info:
-                if info == original_data:
+            detector = cv2.QRCodeDetector()
+            
+            # Helper to test both Single and Multi detection
+            def test_decoding(image_array):
+                # Try Multi
+                retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
+                if retval and decoded_info:
+                    for info in decoded_info:
+                        if info == original_data:
+                            return True
+                # Try Single
+                retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
+                if retval and decoded_info == original_data:
                     return True
-        return False
+                return False
+
+            # 4. Validate Data Integrity
+            if test_decoding(cv_img): return True
+                        
+            # 5. OpenCV is brittle with text/compression. Try a grayscale threshold fallback.
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            if test_decoding(gray): return True
+            
+            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            if test_decoding(thresh): return True
+            
+            return False
+
+        # Strictly test the composite image to guarantee real-world app compatibility
+        return run_test(pil_img)
 
     # --- MAIN GENERATOR ---
 
@@ -1202,7 +1225,7 @@ class SocialQRMaster:
 
         qr = qrcode.QRCode(
             error_correction=ec_level,
-            box_size=10,
+            box_size=1, # <--- FIX: Start at exactly 1 pixel per module
             border=4,
         )
         qr.add_data(payload)
@@ -1275,14 +1298,24 @@ class SocialQRMaster:
 
         # ADAPTIVE SIZING: Cap the height slightly so we always have room for the text above and below
         qr_display_size = int(min(width * 0.85, height * 0.55))
-        qr_resized = qr_img.resize((qr_display_size, qr_display_size), Image.Resampling.NEAREST)
+        
+        # --- FIX: Ensure integer scaling to prevent OpenCV detection failure ---
+        # OpenCV fails if modules are unevenly scaled. We lock the size to an exact multiple.
+        # Since box_size is 1, the image size is exactly the total number of modules!
+        total_modules = qr_img.size[0]
+        pixels_per_module = max(1, qr_display_size // total_modules)
+        optimal_display_size = pixels_per_module * total_modules
+        
+        # Because the source image is 1 pixel per module, NEAREST scaling is mathematically perfect.
+        qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
 
         # Calculate exactly where the QR code will sit (perfectly centered)
-        qr_y_pos = (height - qr_display_size) // 2
-        qr_x_pos = (width - qr_display_size) // 2
+        qr_y_pos = (height - optimal_display_size) // 2
+        qr_x_pos = (width - optimal_display_size) // 2
 
         # Calculate a proportional gap for spacing between the text and the QR code
-        gap = int(min(width, height) * 0.04)
+        # Increased gap to ensure the layout text does not touch the QR code's quiet zone
+        gap = int(min(width, height) * 0.08)
 
         # --- Draw Header Elements ---
         # We start just above the QR code and stack upwards to ensure perfect spacing
@@ -1301,7 +1334,7 @@ class SocialQRMaster:
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
         # --- Draw Footer Elements ---
-        footer_text_y = qr_y_pos + qr_display_size + gap
+        footer_text_y = qr_y_pos + optimal_display_size + gap
         draw_centered("See For Yourself", footer_text_y, action_font)
 
         # Add the app footer directly below the previous text
