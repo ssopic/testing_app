@@ -59,15 +59,6 @@ st.set_page_config(page_title="AI Graph Analyst", layout="wide")
 LLM_MODEL = "mistral-medium"
 SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
 
-# if 'github_data' not in st.session_state:
-#     st.session_state.github_data = load_github_data()
-
-# if "app_state" not in st.session_state:
-#     st.session_state.app_state = {
-#         "connected": False, "mistral_key": "", "neo4j_creds": {}, 
-#         "schema_stats": {}, "evidence_locker": [], "selected_ids": set(), "chat_history": []
-#     }
-
 # ==========================================
 ### 2. STATE MANAGEMENT AND UTILITIES ###
 # ==========================================
