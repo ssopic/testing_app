@@ -1517,6 +1517,7 @@ def screen_locker():
 
 
 @st.fragment
+@st.fragment
 def screen_analysis():
     st.title("Analysis Pane")
     
@@ -1525,6 +1526,12 @@ def screen_analysis():
     if not ids:
         st.warning("No documents selected.")
         return
+    
+    # --- NEW: Clear previous analysis if selected documents change ---
+    current_ids_sorted = sorted(ids)
+    if st.session_state.get("last_analysis_ids") != current_ids_sorted:
+        st.session_state.last_analysis = None
+        st.session_state.last_analysis_ids = current_ids_sorted
     
     # Ensure data is loaded
     if 'github_data' not in st.session_state:
@@ -1612,38 +1619,50 @@ def screen_analysis():
                 final_answer = engine.reduce_facts(facts, q)
                 status.update(label="Analysis Complete", state="complete", expanded=False)
 
-        # 4. Display Result & QR Generation
-        if final_answer:
-            st.info(final_answer)
-            
-            if strategy == "MAP_REDUCE" and 'facts' in locals():
-                with st.expander("View Source Citations"):
-                    for f in facts:
-                        if f.has_relevant_info:
-                            st.markdown(f"**{f.doc_id}**")
-                            st.caption(f"Reasoning: {f.extracted_summary}")
-                            for quote in f.relevant_quotes:
-                                st.text(f"\"{quote}\"")
-                            st.divider()
-            
-            # --- NEW: QR Generation ---
-            st.divider()
-            if st.button("🔗 Generate Shareable QR Code"):
-                queries = get_selected_cypher_queries()
-                if queries:
-                    try:
-                        with st.spinner("Generating secure QR code..."):
-                            qr_master = SocialQRMaster()
-                            # Use the user's question 'q' as the instruction
-                            qr_img = qr_master.generate(queries=queries, title="Graph Analysis", instruction=q)
-                            
-                            buf = io.BytesIO()
-                            qr_img.save(buf, format="PNG")
-                            st.image(buf.getvalue(), caption="Scan to import this analysis")
-                    except Exception as e:
-                        st.error(f"Failed to generate QR: {e}")
-                else:
-                    st.warning("No Cypher queries found in the selected evidence to share.")
+        # --- NEW: Save to session state so it survives button clicks ---
+        st.session_state.last_analysis = {
+            "q": q,
+            "final_answer": final_answer,
+            "strategy": strategy,
+            "facts": facts if strategy == "MAP_REDUCE" else []
+        }
+
+    # 4. Display Result & QR Generation (Now outside the 'if q:' block)
+    if st.session_state.get("last_analysis"):
+        analysis_data = st.session_state.last_analysis
+        st.info(analysis_data["final_answer"])
+        
+        if analysis_data["strategy"] == "MAP_REDUCE" and analysis_data.get("facts"):
+            with st.expander("View Source Citations"):
+                for f in analysis_data["facts"]:
+                    if f.has_relevant_info:
+                        st.markdown(f"**{f.doc_id}**")
+                        st.caption(f"Reasoning: {f.extracted_summary}")
+                        for quote in f.relevant_quotes:
+                            st.text(f"\"{quote}\"")
+                        st.divider()
+        
+        # --- NEW: QR Generation ---
+        st.divider()
+        if st.button("🔗 Generate Shareable QR Code"):
+            queries = get_selected_cypher_queries()
+            if queries:
+                try:
+                    with st.spinner("Generating secure QR code..."):
+                        # SocialQRMaster assumes to be in scope
+                        qr_master = SocialQRMaster()
+                        # Use the saved question
+                        qr_img = qr_master.generate(queries=queries, title="Graph Analysis", instruction=analysis_data["q"])
+                        
+                        buf = io.BytesIO()
+                        qr_img.save(buf, format="PNG")
+                        st.image(buf.getvalue(), caption="Scan to import this analysis")
+                except Exception as e:
+                    st.error(f"Failed to generate QR: {e}")
+            else:
+                st.warning("No Cypher queries found in the selected evidence to share.")
+
+
 # --- DESKTOP ---
 
 @st.fragment
