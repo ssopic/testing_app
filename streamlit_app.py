@@ -1092,7 +1092,7 @@ class SocialQRMaster:
     def _validate_safety(self, query):
         """Ensure query is Read-Only."""
         if self.unsafe_pattern.search(query):
-            raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query}...")
+            raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query[:30]}...")
         return True
 
     def _compress_payload(self, queries, instruction=None):
@@ -1183,7 +1183,7 @@ class SocialQRMaster:
     # --- MAIN GENERATOR ---
 
     def generate(self, queries, title, instruction=None, fill_color="black", back_color="white",
-                 width=1080, height=1080, app_address="silvios.ai", logo_path=None):
+                 width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None):
         """Main entry point. Returns PIL Image or raises ValueError."""
 
         if len(title) > 30:
@@ -1281,11 +1281,18 @@ class SocialQRMaster:
 
         # ADAPTIVE SIZING: Cap the height slightly so we always have room for the text above and below
         qr_display_size = int(min(width * 0.85, height * 0.55))
-        qr_resized = qr_img.resize((qr_display_size, qr_display_size), Image.Resampling.NEAREST)
+        
+        # --- FIX: Ensure integer scaling to prevent OpenCV detection failure ---
+        # OpenCV fails if modules are unevenly scaled. We lock the size to an exact multiple.
+        total_modules = qr_img.size[0] // 10 # 10 is the box_size
+        pixels_per_module = max(1, qr_display_size // total_modules)
+        optimal_display_size = pixels_per_module * total_modules
+        
+        qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
 
         # Calculate exactly where the QR code will sit (perfectly centered)
-        qr_y_pos = (height - qr_display_size) // 2
-        qr_x_pos = (width - qr_display_size) // 2
+        qr_y_pos = (height - optimal_display_size) // 2
+        qr_x_pos = (width - optimal_display_size) // 2
 
         # Calculate a proportional gap for spacing between the text and the QR code
         gap = int(min(width, height) * 0.04)
@@ -1307,7 +1314,7 @@ class SocialQRMaster:
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
         # --- Draw Footer Elements ---
-        footer_text_y = qr_y_pos + qr_display_size + gap
+        footer_text_y = qr_y_pos + optimal_display_size + gap
         draw_centered("See For Yourself", footer_text_y, action_font)
 
         # Add the app footer directly below the previous text
