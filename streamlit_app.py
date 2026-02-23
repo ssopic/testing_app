@@ -1067,21 +1067,6 @@ class MapReduceEngine:
 ### 6. QR code generator and reader  ###
 # ==========================================
 
-import re
-import bz2
-import base64
-import io
-import qrcode
-from PIL import Image, ImageDraw, ImageFont, ImageColor
-
-
-
-import re
-import bz2
-import base64
-import io
-import qrcode
-from PIL import Image, ImageDraw, ImageFont, ImageColor
 
 class SocialQRMaster:
     """
@@ -1154,61 +1139,39 @@ class SocialQRMaster:
 
     # --- SECTION C: RAM-OPTIMIZED VERIFICATION ---
 
-    def _verify_readability(self, pil_img, original_data, fallback_qr=None):
+    def _verify_readability(self, pil_img, original_data):
         """Simulates social media destruction and attempts to read the code."""
         import cv2
         import numpy as np
 
-        def run_test(img_to_test):
-            # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1500px short side)
-            target_short_side = 1500
-            w, h = img_to_test.size
+        # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1000px short side)
+        target_short_side = 1000
+        w, h = pil_img.size
 
-            if min(w, h) > target_short_side:
-                ratio = target_short_side / min(w, h)
-                new_size = (int(w * ratio), int(h * ratio))
-                small_img = img_to_test.resize(new_size, Image.Resampling.LANCZOS)
-            else:
-                small_img = img_to_test
+        if min(w, h) > target_short_side:
+            ratio = target_short_side / min(w, h)
+            new_size = (int(w * ratio), int(h * ratio))
+            small_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+        else:
+            small_img = pil_img
 
-            # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
-            buffer = io.BytesIO()
-            small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
-            buffer.seek(0)
+        # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
+        buffer = io.BytesIO()
+        small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+        buffer.seek(0)
 
-            # 3. Decode with OpenCV
-            file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
-            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        # 3. Decode with OpenCV
+        file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
+        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-            detector = cv2.QRCodeDetector()
-            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(cv_img)
+        detector = cv2.QRCodeDetector()
+        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(cv_img)
 
-            # 4. Validate Data Integrity
-            if retval and decoded_info:
-                for info in decoded_info:
-                    if info == original_data:
-                        return True
-                        
-            # 5. OpenCV is brittle with text/compression. Try a grayscale threshold fallback.
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
-            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(thresh)
-            if retval and decoded_info:
-                for info in decoded_info:
-                    if info == original_data:
-                        return True
-            return False
-
-        # Try testing the full layout first
-        if run_test(pil_img):
-            return True
-            
-        # If OpenCV is confused by the surrounding layout/text, test just the crisp QR code
-        # to ensure the data density successfully survives JPEG compression.
-        if fallback_qr is not None:
-            if run_test(fallback_qr):
-                return True
-                
+        # 4. Validate Data Integrity
+        if retval:
+            for info in decoded_info:
+                if info == original_data:
+                    return True
         return False
 
     # --- MAIN GENERATOR ---
@@ -1239,7 +1202,7 @@ class SocialQRMaster:
 
         qr = qrcode.QRCode(
             error_correction=ec_level,
-            box_size=1, # <--- FIX: Start at exactly 1 pixel per module
+            box_size=10,
             border=4,
         )
         qr.add_data(payload)
@@ -1312,20 +1275,11 @@ class SocialQRMaster:
 
         # ADAPTIVE SIZING: Cap the height slightly so we always have room for the text above and below
         qr_display_size = int(min(width * 0.85, height * 0.55))
-        
-        # --- FIX: Ensure integer scaling to prevent OpenCV detection failure ---
-        # OpenCV fails if modules are unevenly scaled. We lock the size to an exact multiple.
-        # Since box_size is 1, the image size is exactly the total number of modules!
-        total_modules = qr_img.size[0]
-        pixels_per_module = max(1, qr_display_size // total_modules)
-        optimal_display_size = pixels_per_module * total_modules
-        
-        # Because the source image is 1 pixel per module, NEAREST scaling is mathematically perfect.
-        qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
+        qr_resized = qr_img.resize((qr_display_size, qr_display_size), Image.Resampling.NEAREST)
 
         # Calculate exactly where the QR code will sit (perfectly centered)
-        qr_y_pos = (height - optimal_display_size) // 2
-        qr_x_pos = (width - optimal_display_size) // 2
+        qr_y_pos = (height - qr_display_size) // 2
+        qr_x_pos = (width - qr_display_size) // 2
 
         # Calculate a proportional gap for spacing between the text and the QR code
         gap = int(min(width, height) * 0.04)
@@ -1347,7 +1301,7 @@ class SocialQRMaster:
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
         # --- Draw Footer Elements ---
-        footer_text_y = qr_y_pos + optimal_display_size + gap
+        footer_text_y = qr_y_pos + qr_display_size + gap
         draw_centered("See For Yourself", footer_text_y, action_font)
 
         # Add the app footer directly below the previous text
@@ -1372,7 +1326,7 @@ class SocialQRMaster:
                   app_address, fill=text_color, font=footer_font)
 
         # Step 5: THE GAUNTLET (Verification with Smart Error Messaging)
-        if not self._verify_readability(final_img, payload, fallback_qr=qr_resized):
+        if not self._verify_readability(final_img, payload):
              if len(payload) > 500:
                  raise ValueError(
                     f"Quality Check Failed: Too much data ({len(payload)} chars compressed). "
@@ -1387,6 +1341,8 @@ class SocialQRMaster:
 
         print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
         return final_img
+
+
                      
 
 # ==========================================
