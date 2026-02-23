@@ -1695,6 +1695,8 @@ def screen_analysis():
                             instruction=analysis_data["q"],
                             width=width,
                             height=height,
+                            fill_color="#000000",
+                            back_color="#FFFFFF",
                             app_address="silvios.ai"
                         )
                         
