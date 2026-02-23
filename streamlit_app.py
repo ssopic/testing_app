@@ -1517,6 +1517,23 @@ def screen_locker():
 
 
 @st.fragment
+import streamlit as st
+import io
+
+def get_selected_cypher_queries():
+    """Helper to extract cypher queries from the currently selected locker items."""
+    if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
+        return []
+    selected = st.session_state.app_state.get("selected_ids", set())
+    queries = []
+    for entry in st.session_state.app_state["evidence_locker"]:
+        entry_ids = {str(pid) for pid in entry["ids"]}
+        if entry_ids and entry_ids.issubset(selected):
+            if "cypher" in entry and entry["cypher"]:
+                queries.append(entry["cypher"])
+    return queries
+
+@st.fragment
 def screen_analysis():
     st.title("Analysis Pane")
     
@@ -1641,37 +1658,75 @@ def screen_analysis():
                             st.text(f"\"{quote}\"")
                         st.divider()
         
-        # --- NEW: QR Generation ---
+        # --- NEW: QR Generation with Preset Sizes ---
         st.divider()
-        if st.button("🔗 Generate Shareable QR Code"):
+        st.write("### 🔗 Share Analysis (QR Code)")
+        
+        # Define the preset sizes for social media sharing
+        qr_presets = {
+            "Instagram / TikTok Story (1080 x 1920)": (1080, 1920),
+            "Square Feed Post (1080 x 1080)": (1080, 1080),
+            "X / LinkedIn Post (1200 x 675)": (1200, 675)
+        }
+        
+        # Dropdown for preset selection
+        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()))
+        
+        if st.button("Generate QR Code", type="primary"):
             queries = get_selected_cypher_queries()
             
-            # --- NEW: Debugging Output to verify payload ---
-            st.info("🔍 Debug: Data extracted for QR Code generation:")
-            st.markdown(f"**Question (Instruction):** {analysis_data.get('q', 'None')}")
-            with st.expander("Extracted Cypher Queries", expanded=True):
+            # Debugging Output
+            with st.expander("🔍 View Data Payload Details", expanded=False):
+                st.markdown(f"**Instruction:** {analysis_data.get('q', 'None')}")
                 if not queries:
                     st.write("No queries found.")
                 for idx, qry in enumerate(queries):
                     st.markdown(f"**Query {idx + 1}**")
                     st.code(qry, language="cypher")
-            # -----------------------------------------------
 
             if queries:
                 try:
-                    with st.spinner("Generating secure QR code..."):
-                        # SocialQRMaster assumes to be in scope
+                    with st.spinner(f"Generating secure QR code ({selected_preset})..."):
                         qr_master = SocialQRMaster()
-                        # Use the saved question
-                        qr_img = qr_master.generate(queries=queries, title="Graph Analysis", instruction=analysis_data["q"])
+                        width, height = qr_presets[selected_preset]
                         
+                        # Generate the QR with the specific size parameters
+                        qr_img = qr_master.generate(
+                            queries=queries, 
+                            title="Graph Analysis", 
+                            instruction=analysis_data["q"],
+                            width=width,
+                            height=height,
+                            app_address="silvios.ai"
+                        )
+                        
+                        # Save to buffer and convert to bytes
                         buf = io.BytesIO()
                         qr_img.save(buf, format="PNG")
-                        st.image(buf.getvalue(), caption="Scan to import this analysis")
+                        img_bytes = buf.getvalue()
+                        
+                        # Store in session state to prevent disappearance on download
+                        st.session_state.generated_qr_bytes = img_bytes
+                        st.session_state.generated_qr_size = f"{width}x{height}"
+                        
                 except Exception as e:
                     st.error(f"Failed to generate QR: {e}")
             else:
                 st.warning("No Cypher queries found in the selected evidence to share.")
+                
+        # Display the generated image and the download button securely from session state
+        if "generated_qr_bytes" in st.session_state:
+            st.success("QR Code generated successfully!")
+            st.image(st.session_state.generated_qr_bytes, caption=f"Scan to import this analysis ({st.session_state.generated_qr_size})")
+            
+            # Native Streamlit download button
+            st.download_button(
+                label="⬇️ Download Image",
+                data=st.session_state.generated_qr_bytes,
+                file_name=f"graph_analysis_qr_{st.session_state.generated_qr_size}.png",
+                mime="image/png",
+                use_container_width=True
+            )
 
 # --- DESKTOP ---
 
