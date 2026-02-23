@@ -9,7 +9,7 @@ import uuid
 from collections import defaultdict
 import concurrent.futures
 import math
-
+import io
 
 # --- LangChain/Mistral/LLM Imports ---
 from langchain_mistralai import ChatMistralAI
@@ -1517,8 +1517,6 @@ def screen_locker():
 
 
 @st.fragment
-import streamlit as st
-import io
 
 def get_selected_cypher_queries():
     """Helper to extract cypher queries from the currently selected locker items."""
