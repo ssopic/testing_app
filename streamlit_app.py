@@ -1546,7 +1546,6 @@ def screen_locker():
 
 
 @st.fragment
-
 def get_selected_cypher_queries():
     """Helper to extract cypher queries from the currently selected locker items."""
     if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
@@ -1759,6 +1758,122 @@ def screen_analysis():
                 use_container_width=True
             )
 
+#teh process_imorted_qr can be moved to the helper functions part    
+def process_imported_qr(queries, instruction, analyze_now):
+    """Helper to run the queries, fetch IDs, and update state."""
+    # Note: Assumes get_db_driver() and extract_provenance_from_result() are available in scope
+    driver = get_db_driver() 
+    if not driver:
+        st.error("Not connected to database.")
+        return
+        
+    all_found_ids = set()
+    with st.spinner("Executing imported Cypher queries against the database..."):
+        with driver.session() as session:
+            for q in queries:
+                try:
+                    res = session.run(q)
+                    data = [r.data() for r in res]
+                    all_found_ids.update(extract_provenance_from_result(data))
+                except Exception as e:
+                    st.warning(f"A query failed to execute: {e}")
+
+    if not all_found_ids:
+        st.warning("Queries ran, but no matching documents were found in the current database.")
+        return
+
+    # Create payload for the locker
+    payload = {
+        "query": f"Imported QR: {instruction or 'Custom Analysis'}",
+        "answer": "Imported via QR Code",
+        "ids": list(all_found_ids),
+        "cypher": " \nUNION\n ".join(queries) # Combine for display
+    }
+    
+    st.session_state.app_state["evidence_locker"].append(payload)
+    
+    if analyze_now:
+        # Deselect all, then select only the newly imported IDs
+        st.session_state.app_state["selected_ids"] = set(all_found_ids)
+        
+        # Set a flag to trigger the swarm engine automatically in screen_analysis
+        if instruction:
+            st.session_state.auto_trigger_question = instruction
+        
+        st.session_state.current_page = "Analysis"
+        st.rerun()
+    else:
+        st.toast("✅ Saved to Evidence Locker!")
+
+@st.fragment
+def screen_import_qr():
+    st.title("Import Analysis (QR)")
+    st.write("Upload or scan a generated QR code to instantly retrieve the context and run the analysis.")
+    
+    upload = st.file_uploader("Upload QR Code Image", type=["png", "jpg", "jpeg"])
+    camera = st.camera_input("Or Scan with Camera")
+    
+    img_bytes = upload.getvalue() if upload else (camera.getvalue() if camera else None)
+    
+    if img_bytes:
+        # Decode QR using OpenCV
+        file_bytes = np.asarray(bytearray(img_bytes), dtype=np.uint8)
+        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
+        detector = cv2.QRCodeDetector()
+        
+        # Robust decoding function to match the verification gauntlet
+        def extract_qr_string(image_array):
+            # Try Multi-detect
+            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
+            if retval and decoded_info and any(decoded_info):
+                return [info for info in decoded_info if info][0]
+            
+            # Try Single-detect
+            retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
+            if retval and decoded_info:
+                return decoded_info
+                
+            return None
+
+        # 1. Try standard color image
+        decoded_str = extract_qr_string(cv_img)
+        
+        # 2. Try Grayscale fallback (combats compression artifacts)
+        if not decoded_str:
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            decoded_str = extract_qr_string(gray)
+            
+        # 3. Try Binary Threshold fallback (combats bad lighting/low contrast)
+        if not decoded_str:
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            decoded_str = extract_qr_string(thresh)
+            
+        if decoded_str:
+            # Assumes SocialQRMaster is in scope
+            instruction, queries = SocialQRMaster.extract_payload(decoded_str)
+            
+            if queries:
+                st.success("✅ QR Code Decoded Successfully!")
+                st.markdown(f"**Question/Instruction:** {instruction or 'None'}")
+                with st.expander("View Embedded Cypher Queries"):
+                    for q in queries: st.code(q, language="cypher")
+                
+                # User Choice
+                st.divider()
+                st.write("How would you like to proceed?")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Yes, Proceed with Analysis", type="primary", use_container_width=True):
+                        process_imported_qr(queries, instruction, analyze_now=True)
+                with col2:
+                    if st.button("No, Just Save to Locker", use_container_width=True):
+                        process_imported_qr(queries, instruction, analyze_now=False)
+            else:
+                st.error("QR Code was read, but the payload format is unrecognized. Are you sure this is from Graph Analyst?")
+        else:
+            st.error("No valid QR code found in the image. Please ensure the code is clear, well-lit, and fully visible.")
 # --- DESKTOP ---
 
 @st.fragment
@@ -3133,8 +3248,7 @@ def main():
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
         st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Find Evidence and add to cart</b></div>", unsafe_allow_html=True)
-        st.markdown(accent_line, unsafe_allow_html=True)
-        
+        st.markdown(accent_line, unsafe_allow_html=True) # Assuming accent_line is defined in your main file
         
         # Navigation Buttons (Using callbacks for single-click nav)
         st.button("Find Evidence Manually",  use_container_width=True, 
@@ -3142,6 +3256,10 @@ def main():
             
         st.button("Find Evidence via Chat or Cypher", use_container_width=True,
                   on_click=set_page, args=("Find Evidence via Chat or Cypher",))
+
+        # --- NEW BUTTON: Import Analysis (QR) ---
+        st.button("Import Analysis (QR)", use_container_width=True,
+                  on_click=set_page, args=("Import QR",))
 
         # Vertical Spacer to push Config to bottom
         st.markdown("<br>"*10, unsafe_allow_html=True)
@@ -3166,6 +3284,9 @@ def main():
                 screen_locker()
             elif current == "Analysis":
                 screen_analysis()
+            # --- NEW ROUTE: Display the QR screen ---
+            elif current == "Import QR":
+                screen_import_qr()
             else:
                 st.error(f"Unknown page: {current}")
 
@@ -3174,16 +3295,19 @@ def main():
         st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Select from Cart and Analyze</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
-        
         # Locker Badge Calculation
         locker_count = len(st.session_state.app_state["evidence_locker"])
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        st.button(f"Evidence Cart",  use_container_width=True,
+        st.button(f"Evidence Cart{badge}",  use_container_width=True,
                   on_click=set_page, args=("Evidence Cart",))
             
         st.button("Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
+
+# --- Standard Python Runner ---
+if __name__ == "__main__":
+    main()
             
 
 ### RELATIONSHIP DEFINITONS ##
