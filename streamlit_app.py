@@ -30,6 +30,7 @@ import urllib.parse
 import base64, bz2, io, qrcode, cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageColor
+import zipfile
 
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
@@ -1069,162 +1070,79 @@ class MapReduceEngine:
 ### 6. QR code generator and reader  ###
 # ==========================================
 
-
-
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
-    and Verified QR Codes for Neo4j AuraDB.
+    and Verified QR Codes in chunked batches.
     """
 
     def __init__(self):
-        # 1. Security Filter (Read-Only)
         self.unsafe_pattern = re.compile(
             r'\b(CREATE|DELETE|SET|MERGE|REMOVE|DETACH|DROP|LOAD CSV|CALL)\b',
             re.IGNORECASE
         )
 
-    # --- SECTION A: SECURITY & COMPRESSION ---
-
     def _validate_safety(self, query):
-        """Ensure query is Read-Only."""
         if self.unsafe_pattern.search(query):
             raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query[:30]}...")
         return True
 
     def _compress_payload(self, queries, instruction=None):
-        """
-        Structure: Instruction + "||SEP||" + Queries
-        Minify -> Join -> Bz2 -> Base64
-        """
         cleaned_queries = [q.strip() for q in queries]
         queries_joined = "|||".join(cleaned_queries)
         text_part = instruction.strip() if instruction else ""
-
         full_payload = f"{text_part}||SEP||{queries_joined}"
         compressed = bz2.compress(full_payload.encode('utf-8'), compresslevel=9)
         return base64.b64encode(compressed).decode('utf-8')
 
     @staticmethod
     def extract_payload(encoded_payload):
-        """Static Helper: Decodes the QR payload back into (instruction, queries)."""
         try:
             compressed = base64.b64decode(encoded_payload)
             full_string = bz2.decompress(compressed).decode('utf-8')
             parts = full_string.split("||SEP||", 1)
-
             if len(parts) != 2:
                 return None, full_string.split("|||")
-
             desc_text, queries_str = parts
-            instruction = desc_text if desc_text else None
-            queries = queries_str.split("|||")
-            return instruction, queries
+            return desc_text if desc_text else None, queries_str.split("|||")
         except Exception:
             return None, []
 
-    # --- SECTION B: COLOR SAFETY ---
-
     def _check_contrast(self, fill_hex, back_hex):
-        """Calculates luminance to ensure scanner readability."""
         def get_lum(hex_code):
             rgb = ImageColor.getrgb(hex_code)
             return (0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]) / 255.0
-
-        lum_fill = get_lum(fill_hex)
-        lum_back = get_lum(back_hex)
-
-        if lum_fill > lum_back:
+        if get_lum(fill_hex) > get_lum(back_hex):
             return False, "INVERTED: Dots must be darker than background."
-        if (lum_back - lum_fill) < 0.4:
+        if (get_lum(back_hex) - get_lum(fill_hex)) < 0.4:
             return False, "LOW CONTRAST: Colors are too similar."
         return True, "OK"
 
-    # --- SECTION C: RAM-OPTIMIZED VERIFICATION ---
-
     def _verify_readability(self, pil_img, original_data):
-        """Simulates social media destruction and attempts to read the code."""
         import cv2
         import numpy as np
-
-        def run_test(img_to_test):
-            # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1500px short side)
-            target_short_side = 1500
-            w, h = img_to_test.size
-
-            if min(w, h) > target_short_side:
-                ratio = target_short_side / min(w, h)
-                new_size = (int(w * ratio), int(h * ratio))
-                small_img = img_to_test.resize(new_size, Image.Resampling.LANCZOS)
-            else:
-                small_img = img_to_test
-
-            # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
-            buffer = io.BytesIO()
-            small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
-            buffer.seek(0)
-
-            # 3. Decode with OpenCV
-            file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
-            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
-            detector = cv2.QRCodeDetector()
-            
-            # Helper to test both Single and Multi detection
-            def test_decoding(image_array):
-                # Try Multi (Returns 4 values)
-                retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
-                if retval and decoded_info:
-                    for info in decoded_info:
-                        if info == original_data:
-                            return True
-                            
-                # Try Single (Returns 3 values)
-                decoded_text, _, _ = detector.detectAndDecode(image_array)
-                if decoded_text == original_data:
-                    return True
-                    
-                return False
-
-            # 4. Validate Data Integrity
-            if test_decoding(cv_img): return True
-                        
-            # 5. OpenCV is brittle with text/compression. Try a grayscale threshold fallback.
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            if test_decoding(gray): return True
-            
-            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
-            if test_decoding(thresh): return True
-            
-            return False
-
-        # Strictly test the composite image to guarantee real-world app compatibility
-        return run_test(pil_img)
-
-    def _verify_raw_export(self, pil_img, original_data):
-        """Custom verifier for raw exports. Simulates moderate JPEG transfer but skips brutal downscaling."""
-        import cv2
-        import numpy as np
-        import io
         
-        buf = io.BytesIO()
-        pil_img.save(buf, format="JPEG", quality=85) 
-        file_bytes = np.asarray(bytearray(buf.getvalue()), dtype=np.uint8)
-        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        
+        target_short_side = 1500
+        w, h = pil_img.size
+        if min(w, h) > target_short_side:
+            ratio = target_short_side / min(w, h)
+            small_img = pil_img.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
+        else:
+            small_img = pil_img
+
+        buffer = io.BytesIO()
+        small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+        buffer.seek(0)
+        cv_img = cv2.imdecode(np.asarray(bytearray(buffer.read()), dtype=np.uint8), cv2.IMREAD_COLOR)
         detector = cv2.QRCodeDetector()
         
         def test_scan(image_array):
-            # Try Multi (Returns 4 values)
             ret, dec, _, _ = detector.detectAndDecodeMulti(image_array)
             if ret and dec and original_data in dec: return True
-            
-            # Try Single (Returns 3 values)
-            decoded_text, _, _ = detector.detectAndDecode(image_array)
-            if decoded_text == original_data: return True
-            
+            dec_text, _, _ = detector.detectAndDecode(image_array)
+            if dec_text == original_data: return True
             return False
-            
+
         if test_scan(cv_img): return True
         gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
         if test_scan(gray): return True
@@ -1232,184 +1150,96 @@ class SocialQRMaster:
         if test_scan(thresh): return True
         return False
 
-    # --- MAIN GENERATOR ---
-
-    def generate(self, queries, title, instruction=None, fill_color="black", back_color="white",
-                 width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None, raw_export=False):
-        """Main entry point. Returns PIL Image or raises ValueError."""
-
-        if len(title) > 30:
-            title = title[:27] + "..."
-
-        for q in queries:
-            self._validate_safety(q)
-
-        is_safe, msg = self._check_contrast(fill_color, back_color)
-        if not is_safe:
-            raise ValueError(f"Color Error: {msg}")
-
-        # Compress Payload
-        payload = self._compress_payload(queries, instruction)
-
-        # ADAPTIVE ERROR CORRECTION:
-        ec_level = qrcode.constants.ERROR_CORRECT_H
-        if len(payload) > 550:
-            ec_level = qrcode.constants.ERROR_CORRECT_Q
-            print("INFO: Large payload detected. Utilizing Adaptive Density (EC Level Q).")
-
-        qr = qrcode.QRCode(
-            error_correction=ec_level,
-            box_size=1, # Guaranteed 1 pixel per module
-            border=4,
-        )
+    def _generate_single_image(self, payload, title, fill_color, back_color, width, height, app_address, logo_path, raw_export):
+        """Internal worker that draws and tests a single QR code image."""
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_Q, box_size=1, border=4)
         qr.add_data(payload)
         qr.make(fit=True)
-
         qr_img = qr.make_image(fill_color=fill_color, back_color=back_color).convert('RGB')
+        
+        # Lock sizing to prevent OpenCV distortion
         total_modules = qr_img.size[0]
-
-        # --- NEW: Raw Export Auto-Sizing ---
-        if raw_export:
-            # Force massive, uncompressed integer scaling
-            pixels_per_module = 16 
-            optimal_display_size = pixels_per_module * total_modules
-            width = optimal_display_size + 400
-            height = optimal_display_size + 800
-        else:
-            qr_display_size = int(min(width * 0.85, height * 0.55))
-            pixels_per_module = max(1, qr_display_size // total_modules)
-            optimal_display_size = pixels_per_module * total_modules
-            
+        qr_display_size = int(min(width * 0.85, height * 0.55))
+        pixels_per_module = max(1, qr_display_size // total_modules)
+        optimal_display_size = pixels_per_module * total_modules
         qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
 
         final_img = Image.new('RGB', (width, height), back_color)
         draw = ImageDraw.Draw(final_img)
 
-        # --- DYNAMIC LAYOUT ---
+        # Fonts
         avg_dim = (width + height) // 2
-        target_primary_size = int(avg_dim * 0.08)
-        target_secondary_size = int(avg_dim * 0.045)
-        target_footer_size = int(avg_dim * 0.035)
+        def get_font(max_size, is_bold=False):
+            try: return ImageFont.truetype("arialbd.ttf" if is_bold else "arial.ttf", max_size)
+            except: return ImageFont.load_default()
+            
+        title_font = get_font(int(avg_dim * 0.045), False)
+        warning_font = get_font(int(avg_dim * 0.08), True)
+        footer_font = get_font(int(avg_dim * 0.035), False)
 
-        def get_fitting_font(text, max_size, max_width, is_bold=False):
-            fonts_to_try = [
-                "arialbd.ttf" if is_bold else "arial.ttf",
-                "Arial Bold.ttf" if is_bold else "Arial.ttf",
-                "DejaVuSans-Bold.ttf" if is_bold else "DejaVuSans.ttf",
-                "LiberationSans-Bold.ttf" if is_bold else "LiberationSans-Regular.ttf"
-            ]
-            font = None
-            size = max_size
-            font_path_used = None
-            for font_name in fonts_to_try:
-                try:
-                    font = ImageFont.truetype(font_name, size)
-                    font_path_used = font_name
-                    break
-                except IOError:
-                    continue
-            if font is None:
-                return ImageFont.load_default(), max_size
-            while size > 12:
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                if text_width <= max_width:
-                    break
-                size -= 2
-                font = ImageFont.truetype(font_path_used, size)
-            return font, size
-
-        title_font, actual_title_size = get_fitting_font(title, target_secondary_size, width * 0.9, is_bold=False)
-        warning_font, actual_warning_size = get_fitting_font("Don't trust me blindly!", target_primary_size, width * 0.9, is_bold=True)
-        action_font, actual_action_size = get_fitting_font("See For Yourself", target_primary_size, width * 0.9, is_bold=True)
-        footer_font, actual_footer_size = get_fitting_font(app_address, target_footer_size, width * 0.6)
-
-        bg_lum = (0.299*ImageColor.getrgb(back_color)[0] + 0.587*ImageColor.getrgb(back_color)[1] + 0.114*ImageColor.getrgb(back_color)[2])
-        text_color = "white" if bg_lum < 128 else "black"
-
-        # --- NEW: Added fill_override parameter for the Red Text ---
-        def draw_centered(text, y, font, fill_override=None):
+        def draw_centered(text, y, font, fill=None):
             bbox = draw.textbbox((0, 0), text, font=font)
             w = bbox[2] - bbox[0]
-            fill = fill_override if fill_override else text_color
-            draw.text(((width - w) // 2, y), text, fill=fill, font=font)
+            draw.text(((width - w) // 2, y), text, fill=fill or "black", font=font)
 
         qr_y_pos = (height - optimal_display_size) // 2
         qr_x_pos = (width - optimal_display_size) // 2
         gap = int(min(width, height) * 0.08)
 
-        # Draw Header Elements
-        bottom_of_header = qr_y_pos - gap
-        title_y = bottom_of_header - actual_title_size
-        draw_centered(title, title_y, title_font)
-        bottom_of_header = title_y - (gap // 2)
-        warning_y = bottom_of_header - actual_warning_size
-        draw_centered("Don't trust me blindly!", warning_y, warning_font)
-
-        # Paste QR
+        # Header
+        draw_centered(title, qr_y_pos - gap - int(avg_dim * 0.045), title_font)
+        draw_centered("Don't trust me blindly!", qr_y_pos - gap - int(avg_dim * 0.045) - int(avg_dim * 0.08) - (gap//2), warning_font)
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
-        # --- NEW: Draw Red Warnings for Raw Export ---
+        # Footer & Styling based on Export Type
         if raw_export:
-            # 1. Thick Red Outline
-            draw.rectangle(
-                [qr_x_pos - 15, qr_y_pos - 15, qr_x_pos + optimal_display_size + 15, qr_y_pos + optimal_display_size + 15],
-                outline="#FF0000", width=15
-            )
-            
-            raw_warn = "⚠️ RAW EXPORT: DO NOT POST TO SOCIAL MEDIA ⚠️"
-            color_warn = "If this text is NOT bright red, the image is compressed!"
-            
-            warn_y = qr_y_pos + optimal_display_size + gap
-            draw_centered(raw_warn, warn_y, action_font, fill_override="#FF0000")
-            draw_centered(color_warn, warn_y + actual_action_size + 15, title_font, fill_override="#FF0000")
-            
-            footer_text_y = warn_y + actual_action_size + actual_title_size + gap
+            draw.rectangle([15, 15, width - 15, height - 15], outline="#FF0000", width=15)
+            draw_centered("RAW EXPORT", qr_y_pos + optimal_display_size + gap, warning_font, "#FF0000")
+            draw_centered("Import directly into the app.", qr_y_pos + optimal_display_size + gap + int(avg_dim*0.1), title_font, "#FF0000")
         else:
-            footer_text_y = qr_y_pos + optimal_display_size + gap
-            draw_centered("See For Yourself", footer_text_y, action_font)
+            draw_centered("See For Yourself", qr_y_pos + optimal_display_size + gap, warning_font)
+            
+        draw_centered(app_address, height - gap - int(avg_dim * 0.035), footer_font)
 
-        # Draw Footer Elements
-        footer_y = footer_text_y + actual_action_size + gap
-        logo_size = int(actual_footer_size * 1.5)
-        addr_bbox = draw.textbbox((0, 0), app_address, font=footer_font)
-        addr_width = addr_bbox[2] - addr_bbox[0]
-        total_footer_width = logo_size + 15 + addr_width
-        footer_start_x = (width - total_footer_width) // 2
+        if not self._verify_readability(final_img, payload):
+            raise ValueError("Quality Check Failed: This chunk could not be verified by OpenCV.")
 
-        if logo_path:
-            try:
-                logo = Image.open(logo_path).convert("RGBA")
-                logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-                final_img.paste(logo, (footer_start_x, footer_y), logo)
-            except:
-                draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
-        else:
-            draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
-
-        draw.text((footer_start_x + logo_size + 15, footer_y + (logo_size - actual_footer_size)//2),
-                  app_address, fill=text_color, font=footer_font)
-
-        # Step 5: THE GAUNTLET (Verification with Smart Error Messaging)
-        if raw_export:
-            if not self._verify_raw_export(final_img, payload):
-                raise ValueError("Quality Check Failed: The raw export density is too high for scanners even at this size.")
-        else:
-            if not self._verify_readability(final_img, payload):
-                 if len(payload) > 500:
-                     raise ValueError(
-                        f"Quality Check Failed: Too much data ({len(payload)} chars compressed). "
-                        "The QR code dots are too small to survive social media compression. "
-                        "Please reduce the number of queries or shorten your description."
-                     )
-                 else:
-                     raise ValueError(
-                        "Quality Check Failed: This color combination is unreadable "
-                        "by standard scanners. Please use higher contrast colors."
-                     )
-
-        print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
         return final_img
+
+    def generate_batch(self, queries, title, instruction=None, fill_color="black", back_color="white",
+                       width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None, raw_export=False):
+        """
+        Public Entry Point: Returns a LIST of verified PIL Images.
+        Automatically chunks large payloads.
+        """
+        for q in queries: self._validate_safety(q)
+        is_safe, msg = self._check_contrast(fill_color, back_color)
+        if not is_safe: raise ValueError(f"Color Error: {msg}")
+
+        full_payload = self._compress_payload(queries, instruction)
+        
+        # Max ~500 chars guarantees dense payloads survive heavy JPEG compression at 1080px
+        CHUNK_SIZE = 500 
+        chunks = [full_payload[i:i+CHUNK_SIZE] for i in range(0, len(full_payload), CHUNK_SIZE)]
+        total = len(chunks)
+        
+        # For RAW exports, we default to 1500px to give maximum breathing room
+        if raw_export:
+            width, height = 1500, 1500
+            
+        generated_images = []
+        for i, chunk in enumerate(chunks):
+            if total > 1:
+                chunk_payload = f"[CHUNK {i+1}/{total}]{chunk}"
+                page_title = f"{title} (Part {i+1} of {total})"
+            else:
+                chunk_payload = chunk
+                page_title = title
+                
+            img = self._generate_single_image(chunk_payload, page_title, fill_color, back_color, width, height, app_address, logo_path, raw_export)
+            generated_images.append(img)
+            
+        return generated_images
 
                      
 
@@ -1723,7 +1553,7 @@ def screen_analysis():
         st.write("### 🔗 Share Analysis (QR Code)")
         
         qr_presets = {
-            "Raw Data / Full Quality (Auto-Sized)": "RAW",
+            "Raw Data / Full Quality (Archive)": "RAW",
             "Instagram / TikTok Story (1080 x 1920)": (1080, 1920),
             "Square Feed Post (1080 x 1080)": (1080, 1080),
             "X / LinkedIn Post (1200 x 675)": (1200, 675)
@@ -1731,137 +1561,83 @@ def screen_analysis():
         
         selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()))
         
-        if st.button("Generate QR Code", type="primary"):
+        if st.button("Generate QR Code(s)", type="primary"):
             queries = get_selected_cypher_queries()
-            
-            with st.expander("🔍 View Data Payload Details", expanded=False):
-                st.markdown(f"**Instruction:** {analysis_data.get('q', 'None')}")
-                if not queries:
-                    st.write("No queries found.")
-                for idx, qry in enumerate(queries):
-                    st.markdown(f"**Query {idx + 1}**")
-                    st.code(qry, language="cypher")
-
             if queries:
                 try:
-                    with st.spinner(f"Generating secure QR code ({selected_preset})..."):
+                    with st.spinner(f"Generating verified QR batch ({selected_preset})..."):
                         qr_master = SocialQRMaster()
                         
-                        if qr_presets[selected_preset] == "RAW":
-                            # --- 1. Size Prediction Engine ---
-                            # Compress data silently first to gauge how massive it is
-                            test_payload = qr_master._compress_payload(queries, analysis_data["q"])
-                            payload_len = len(test_payload)
-                            
-                            # Base size is 2048. Scale starting size up dynamically based on zipped byte count.
-                            current_size = 2048
-                            if payload_len > 500:
-                                current_size += ((payload_len - 500) // 150) * 500
-                                
-                            current_size = min(current_size, 3500) # Cap starting prediction safely
-                            max_size = 4500
-                            
-                            # --- 2. Auto-Scaling Loop (Using Native Raw Export) ---
-                            base_img = None
-                            while current_size <= max_size:
-                                try:
-                                    base_img = qr_master.generate(
-                                        queries=queries, 
-                                        title="Graph Analysis", 
-                                        instruction=analysis_data["q"],
-                                        fill_color="#000000",
-                                        back_color="#FFFFFF",
-                                        width=current_size,
-                                        height=current_size,
-                                        app_address="silvios.ai",
-                                        raw_export=True  # Clean flag, no monkey patching!
-                                    )
-                                    break # Success! Passed the verification test natively.
-                                except ValueError as e:
-                                    if "Quality Check Failed" in str(e):
-                                        current_size += 500
-                                        if current_size > max_size:
-                                            raise ValueError(f"Payload too massive ({payload_len} bytes). Failed verification even at {max_size}px. Please select fewer documents.")
-                                    else:
-                                        raise e
-                            
-                            # --- 3. Post-Process Visuals (Borders & Soft Warnings) ---
-                            # Dynamically scale font/padding sizes based on the final generated resolution
-                            raw_w = base_img.width
-                            warning_block_height = int(raw_w * 0.12)
-                            raw_h = base_img.height + warning_block_height
-                            
-                            qr_img = Image.new("RGB", (raw_w, raw_h), "white")
-                            qr_img.paste(base_img, (0, 0))
-                            
-                            draw = ImageDraw.Draw(qr_img)
-                            
-                            # Thick Red Border
-                            border_width = max(10, int(raw_w * 0.008))
-                            draw.rectangle([border_width, border_width, raw_w - border_width, raw_h - border_width], outline="#FF0000", width=border_width)
-                            
-                            # Dynamically sized fonts
-                            try:
-                                font_bold = ImageFont.truetype("arialbd.ttf", int(raw_w * 0.022))
-                                font_reg = ImageFont.truetype("arial.ttf", int(raw_w * 0.015))
-                            except:
-                                font_bold = ImageFont.load_default()
-                                font_reg = ImageFont.load_default()
-                            
-                            warn_title = "RAW EXPORT: BEST FOR DIRECT SHARING"
-                            warn_sub1 = "Note: Certain social media platforms heavily compress uploaded images."
-                            warn_sub2 = "If you are unable to scan this, the image quality may have been impacted during transfer."
-                            
-                            def draw_centered(d, text, y, f, color):
-                                bbox = d.textbbox((0, 0), text, font=f)
-                                text_w = bbox[2] - bbox[0]
-                                d.text(((raw_w - text_w) // 2, y), text, fill=color, font=f)
-                            
-                            # Spacing
-                            gap_y = int(warning_block_height * 0.15)
-                            draw_centered(draw, warn_title, base_img.height + gap_y, font_bold, "#FF0000")
-                            draw_centered(draw, warn_sub1, base_img.height + gap_y + int(gap_y*2.5), font_reg, "#FF0000")
-                            draw_centered(draw, warn_sub2, base_img.height + gap_y + int(gap_y*4.5), font_reg, "#FF0000")
-
-                        else:
-                            # Standard Preset Sizing
-                            width, height = qr_presets[selected_preset]
-                            qr_img = qr_master.generate(
-                                queries=queries, 
-                                title="Graph Analysis", 
-                                instruction=analysis_data["q"],
-                                fill_color="#000000",
-                                back_color="#FFFFFF",
-                                width=width,
-                                height=height,
-                                app_address="silvios.ai"
-                            )
+                        is_raw = qr_presets[selected_preset] == "RAW"
+                        w, h = (1080, 1080) if is_raw else qr_presets[selected_preset]
                         
-                        buf = io.BytesIO()
-                        qr_img.save(buf, format="PNG")
-                        img_bytes = buf.getvalue()
+                        # Generate the Batch (Returns a list of images)
+                        img_list = qr_master.generate_batch(
+                            queries=queries, 
+                            title="Graph Analysis", 
+                            instruction=analysis_data["q"],
+                            fill_color="#000000",
+                            back_color="#FFFFFF",
+                            width=w,
+                            height=h,
+                            app_address="silvios.ai",
+                            raw_export=is_raw
+                        )
                         
-                        st.session_state.generated_qr_bytes = img_bytes
-                        st.session_state.generated_qr_size = f"{qr_img.width}x{qr_img.height}"
+                        # Save images to session state for display
+                        st.session_state.generated_qr_batch = []
+                        for img in img_list:
+                            buf = io.BytesIO()
+                            img.save(buf, format="PNG")
+                            st.session_state.generated_qr_batch.append(buf.getvalue())
+                            
+                        st.session_state.generated_qr_size = f"{img_list[0].width}x{img_list[0].height}"
                         
                 except Exception as e:
                     st.error(f"Failed to generate QR: {e}")
             else:
                 st.warning("No Cypher queries found in the selected evidence to share.")
                 
-        if "generated_qr_bytes" in st.session_state:
-            st.success("QR Code generated successfully!")
-            st.image(st.session_state.generated_qr_bytes, caption=f"Scan to import this analysis ({st.session_state.generated_qr_size})")
+        # --- NEW: Display Batch Downloads (ZIP + Individuals) ---
+        if "generated_qr_batch" in st.session_state:
+            images = st.session_state.generated_qr_batch
+            total_images = len(images)
             
-            st.download_button(
-                label="⬇️ Download Image",
-                data=st.session_state.generated_qr_bytes,
-                file_name=f"graph_analysis_qr_{st.session_state.generated_qr_size}.png",
-                mime="image/png",
-                use_container_width=True
-            )
+            st.success(f"Generated {total_images} QR code(s) successfully!")
+            
+            # If multiple images, generate a ZIP file
+            if total_images > 1:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for i, img_bytes in enumerate(images):
+                        zip_file.writestr(f"graph_analysis_part_{i+1}_of_{total_images}.png", img_bytes)
+                
+                st.download_button(
+                    label="📦 Download Complete Archive (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name="graph_analysis_qrs.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    type="primary"
+                )
+                st.write("Or download images individually below:")
+            
+            # Display individual images and buttons
+            cols = st.columns(total_images if total_images <= 4 else 4)
+            for i, img_bytes in enumerate(images):
+                with cols[i % 4]:
+                    st.image(img_bytes, caption=f"Part {i+1} of {total_images}")
+                    st.download_button(
+                        label=f"⬇️ Download Part {i+1}",
+                        data=img_bytes,
+                        file_name=f"graph_analysis_{st.session_state.generated_qr_size}_part{i+1}.png",
+                        mime="image/png",
+                        use_container_width=True,
+                        key=f"dl_btn_{i}"
+                    )
 
 #teh process_imorted_qr can be moved to the helper functions part    
+
 
 def process_imported_qr(queries, instruction, analyze_now):
     """Helper to run the queries, fetch IDs, and update state."""
@@ -1897,10 +1673,7 @@ def process_imported_qr(queries, instruction, analyze_now):
     st.session_state.app_state["evidence_locker"].append(payload)
     
     if analyze_now:
-        # Deselect all, then select only the newly imported IDs
         st.session_state.app_state["selected_ids"] = set(all_found_ids)
-        
-        # Set a flag to trigger the swarm engine automatically in screen_analysis
         if instruction:
             st.session_state.auto_trigger_question = instruction
         
@@ -1912,59 +1685,85 @@ def process_imported_qr(queries, instruction, analyze_now):
 @st.fragment
 def screen_import_qr():
     st.title("Import Analysis (QR)")
-    st.write("Upload or scan a generated QR code to instantly retrieve the context and run the analysis.")
+    st.write("Upload a QR code (or a batch of QR codes) to instantly retrieve the context and run the analysis.")
     
-    upload = st.file_uploader("Upload QR Code Image", type=["png", "jpg", "jpeg"])
+    # --- NEW: Accept Multiple Files for Batch Processing ---
+    upload_list = st.file_uploader("Upload QR Code Image(s)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
     camera = st.camera_input("Or Scan with Camera")
     
-    img_bytes = upload.getvalue() if upload else (camera.getvalue() if camera else None)
+    all_images = []
+    if upload_list:
+        all_images.extend(upload_list)
+    if camera:
+        all_images.append(camera)
     
-    if img_bytes:
-        # Decode QR using OpenCV
-        file_bytes = np.asarray(bytearray(img_bytes), dtype=np.uint8)
-        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        
+    if all_images:
         detector = cv2.QRCodeDetector()
         
-        # Robust decoding function to match the verification gauntlet
         def extract_qr_string(image_array):
-            # Try Multi-detect (Returns 4 values)
             retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
             if retval and decoded_info and any(decoded_info):
                 return [info for info in decoded_info if info][0]
             
-            # Try Single-detect (Returns 3 values)
             decoded_text, _, _ = detector.detectAndDecode(image_array)
-            if decoded_text:
-                return decoded_text
-                
+            if decoded_text: return decoded_text
             return None
 
-        # 1. Try standard color image
-        decoded_str = extract_qr_string(cv_img)
+        chunks = {}
+        total_expected = None
+        single_payload = None
         
-        # 2. Try Grayscale fallback (combats compression artifacts)
-        if not decoded_str:
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            decoded_str = extract_qr_string(gray)
+        # Process all uploaded images
+        for img_input in all_images:
+            file_bytes = np.asarray(bytearray(img_input.getvalue()), dtype=np.uint8)
+            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             
-        # 3. Try Binary Threshold fallback (combats bad lighting/low contrast)
-        if not decoded_str:
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
-            decoded_str = extract_qr_string(thresh)
-            
-        if decoded_str:
-            # Assumes SocialQRMaster is in scope
-            instruction, queries = SocialQRMaster.extract_payload(decoded_str)
+            # RAM-Optimization for OpenCV
+            h, w = cv_img.shape[:2]
+            if min(w, h) > 1500:
+                ratio = 1500 / min(w, h)
+                cv_img = cv2.resize(cv_img, (int(w * ratio), int(h * ratio)), interpolation=cv2.INTER_AREA)
+
+            decoded_str = extract_qr_string(cv_img)
+            if not decoded_str:
+                gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+                decoded_str = extract_qr_string(gray)
+            if not decoded_str:
+                _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+                decoded_str = extract_qr_string(thresh)
+                
+            if decoded_str:
+                # --- NEW: Detect Chunks vs Single Payloads ---
+                match = re.match(r"^\[CHUNK (\d+)/(\d+)\](.*)", decoded_str, flags=re.DOTALL)
+                if match:
+                    idx = int(match.group(1))
+                    tot = int(match.group(2))
+                    total_expected = tot
+                    chunks[idx] = match.group(3)
+                else:
+                    single_payload = decoded_str
+
+        # Assemble the final payload based on what we found
+        final_payload_to_process = None
+        
+        if single_payload:
+            final_payload_to_process = single_payload
+        elif total_expected and len(chunks) == total_expected:
+            # Stitch chunks back together in order
+            final_payload_to_process = "".join([chunks[i] for i in range(1, total_expected + 1)])
+            st.success(f"Successfully assembled {total_expected} QR Code chunks!")
+        elif total_expected:
+            st.info(f"⏳ Collected {len(chunks)} of {total_expected} required QR codes. Please upload the remaining images.")
+
+        if final_payload_to_process:
+            instruction, queries = SocialQRMaster.extract_payload(final_payload_to_process)
             
             if queries:
-                st.success("✅ QR Code Decoded Successfully!")
+                st.success("✅ Payload Decoded Successfully!")
                 st.markdown(f"**Question/Instruction:** {instruction or 'None'}")
                 with st.expander("View Embedded Cypher Queries"):
                     for q in queries: st.code(q, language="cypher")
                 
-                # User Choice
                 st.divider()
                 st.write("How would you like to proceed?")
                 col1, col2 = st.columns(2)
@@ -1975,9 +1774,12 @@ def screen_import_qr():
                     if st.button("No, Just Save to Locker", use_container_width=True):
                         process_imported_qr(queries, instruction, analyze_now=False)
             else:
-                st.error("QR Code was read, but the payload format is unrecognized. Are you sure this is from Graph Analyst?")
-        else:
-            st.error("No valid QR code found in the image. Please ensure the code is clear, well-lit, and fully visible.")
+                st.error("QR Code was read, but the payload format is unrecognized.")
+        elif not single_payload and not total_expected:
+            st.error("No valid QR codes found in the uploaded images.")
+
+
+
 # --- DESKTOP ---
 
 @st.fragment
