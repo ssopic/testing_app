@@ -1285,8 +1285,8 @@ class SocialQRMaster:
             return ImageFont.load_default()
             
         # --- FIX: Safely increased the font sizes
-        title_font = get_font(int(avg_dim * 0.06), False)       # Increased from 0.045
-        warning_font = get_font(int(avg_dim * 0.10), True)      # Increased from 0.08
+        title_font = get_font(int(avg_dim * 0.05), False)       # Increased from 0.045
+        warning_font = get_font(int(avg_dim * 0.05), True)      # Increased from 0.08
         footer_font = get_font(int(avg_dim * 0.05), False)      # Increased from 0.035
 
         def draw_centered(text, y, font, fill=None):
