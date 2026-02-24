@@ -1468,7 +1468,7 @@ def screen_locker():
     st.session_state.app_state["selected_ids"] = current_selection
 
 
-@st.fragment
+
 def get_selected_cypher_queries():
     """Helper to extract cypher queries from the currently selected locker items."""
     if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
@@ -1482,7 +1482,10 @@ def get_selected_cypher_queries():
                 queries.append(entry["cypher"])
     return queries
 
-@st.fragment
+# --- FIX: Clears the old QR codes when you switch formats ---
+def clear_qr_cache():
+    st.session_state.pop("generated_qr_batch", None)
+    st.session_state.pop("generated_qr_size", None)
 
 @st.fragment
 def screen_analysis():
@@ -1527,7 +1530,6 @@ def screen_analysis():
     
     q = st.chat_input("Ask about this evidence set:")
     
-    # Override 'q' if we have an auto-trigger
     if auto_q:
         q = auto_q
         with st.chat_message("user"): 
@@ -1539,10 +1541,8 @@ def screen_analysis():
             st.error("Mistral API Key is missing.")
             return
 
-        # Initialize Engine
-        engine = MapReduceEngine(api_key=api_key) # Assuming MapReduceEngine is in scope
+        engine = MapReduceEngine(api_key=api_key) 
         
-        # Prepare Docs for the Engine
         docs_payload = []
         for _, row in matched.iterrows():
             docs_payload.append({
@@ -1550,7 +1550,6 @@ def screen_analysis():
                 "Bates_Identity": row.get('Bates_Identity', 'Unknown')
             })
 
-        # --- THE PIPELINE UI ---
         with st.status("Initializing Agent Swarm...", expanded=True) as status:
             
             strategy = engine.estimate_strategy([d['Body'] for d in docs_payload])
@@ -1584,7 +1583,6 @@ def screen_analysis():
                 final_answer = engine.reduce_facts(facts, q)
                 status.update(label="Analysis Complete", state="complete", expanded=False)
 
-        # Save to session state so it survives button clicks
         st.session_state.last_analysis = {
             "q": q,
             "final_answer": final_answer,
@@ -1617,7 +1615,8 @@ def screen_analysis():
             "X / LinkedIn Post (1200 x 675)": (1200, 675)
         }
         
-        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()))
+        # --- FIX: We bind the on_change callback here to clear old images ---
+        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()), on_change=clear_qr_cache)
         
         if st.button("Generate QR Code(s)", type="primary"):
             queries = get_selected_cypher_queries()
@@ -1629,7 +1628,6 @@ def screen_analysis():
                         is_raw = qr_presets[selected_preset] == "RAW"
                         w, h = (1080, 1080) if is_raw else qr_presets[selected_preset]
                         
-                        # Generate the Batch (Returns a list of images)
                         img_list = qr_master.generate_batch(
                             queries=queries, 
                             title="Graph Analysis", 
@@ -1642,7 +1640,6 @@ def screen_analysis():
                             raw_export=is_raw
                         )
                         
-                        # Save images to session state for display
                         st.session_state.generated_qr_batch = []
                         for img in img_list:
                             buf = io.BytesIO()
@@ -1656,14 +1653,12 @@ def screen_analysis():
             else:
                 st.warning("No Cypher queries found in the selected evidence to share.")
                 
-        # --- NEW: Display Batch Downloads (ZIP + Individuals) ---
         if "generated_qr_batch" in st.session_state:
             images = st.session_state.generated_qr_batch
             total_images = len(images)
             
             st.success(f"Generated {total_images} QR code(s) successfully!")
             
-            # If multiple images, generate a ZIP file
             if total_images > 1:
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -1680,7 +1675,6 @@ def screen_analysis():
                 )
                 st.write("Or download images individually below:")
             
-            # Display individual images and buttons
             cols = st.columns(total_images if total_images <= 4 else 4)
             for i, img_bytes in enumerate(images):
                 with cols[i % 4]:
@@ -1693,13 +1687,10 @@ def screen_analysis():
                         use_container_width=True,
                         key=f"dl_btn_{i}"
                     )
-
 #teh process_imorted_qr can be moved to the helper functions part    
-
 
 def process_imported_qr(queries, instruction, analyze_now):
     """Helper to run the queries, fetch IDs, and update state."""
-    # Note: Assumes get_db_driver() and extract_provenance_from_result() are available in scope
     driver = get_db_driver() 
     if not driver:
         st.error("Not connected to database.")
@@ -1720,12 +1711,11 @@ def process_imported_qr(queries, instruction, analyze_now):
         st.warning("Queries ran, but no matching documents were found in the current database.")
         return
 
-    # Create payload for the locker
     payload = {
         "query": f"Imported QR: {instruction or 'Custom Analysis'}",
         "answer": "Imported via QR Code",
         "ids": list(all_found_ids),
-        "cypher": " \nUNION\n ".join(queries) # Combine for display
+        "cypher": " \nUNION\n ".join(queries) 
     }
     
     st.session_state.app_state["evidence_locker"].append(payload)
@@ -1734,24 +1724,41 @@ def process_imported_qr(queries, instruction, analyze_now):
         st.session_state.app_state["selected_ids"] = set(all_found_ids)
         if instruction:
             st.session_state.auto_trigger_question = instruction
-        
         st.session_state.current_page = "Analysis"
         st.rerun()
     else:
         st.toast("✅ Saved to Evidence Locker!")
 
+# --- Helper Class to mock Streamlit's UploadedFile for ZIP extraction ---
+class ZipImageWrapper:
+    def __init__(self, data):
+        self.data = data
+    def getvalue(self):
+        return self.data
+
 @st.fragment
 def screen_import_qr():
     st.title("Import Analysis (QR)")
-    st.write("Upload a QR code (or a batch of QR codes) to instantly retrieve the context and run the analysis.")
+    st.write("Upload a QR code (or a batch of QR codes / ZIP file) to instantly retrieve the context and run the analysis.")
     
-    # --- NEW: Accept Multiple Files for Batch Processing ---
-    upload_list = st.file_uploader("Upload QR Code Image(s)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    # --- FIX: Included 'zip' in supported types ---
+    upload_list = st.file_uploader("Upload QR Code Image(s) or ZIP", type=["png", "jpg", "jpeg", "zip"], accept_multiple_files=True)
     camera = st.camera_input("Or Scan with Camera")
     
     all_images = []
+    
     if upload_list:
-        all_images.extend(upload_list)
+        for uploaded_file in upload_list:
+            # --- FIX: Automatically extract and load images if a ZIP is uploaded ---
+            if uploaded_file.name.lower().endswith('.zip'):
+                with zipfile.ZipFile(uploaded_file, "r") as z:
+                    for filename in z.namelist():
+                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                            img_data = z.read(filename)
+                            all_images.append(ZipImageWrapper(img_data))
+            else:
+                all_images.append(uploaded_file)
+                
     if camera:
         all_images.append(camera)
     
@@ -1762,7 +1769,6 @@ def screen_import_qr():
             retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
             if retval and decoded_info and any(decoded_info):
                 return [info for info in decoded_info if info][0]
-            
             decoded_text, _, _ = detector.detectAndDecode(image_array)
             if decoded_text: return decoded_text
             return None
@@ -1771,12 +1777,10 @@ def screen_import_qr():
         total_expected = None
         single_payload = None
         
-        # Process all uploaded images
         for img_input in all_images:
             file_bytes = np.asarray(bytearray(img_input.getvalue()), dtype=np.uint8)
             cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             
-            # RAM-Optimization for OpenCV
             h, w = cv_img.shape[:2]
             if min(w, h) > 1500:
                 ratio = 1500 / min(w, h)
@@ -1791,7 +1795,6 @@ def screen_import_qr():
                 decoded_str = extract_qr_string(thresh)
                 
             if decoded_str:
-                # --- NEW: Detect Chunks vs Single Payloads ---
                 match = re.match(r"^\[CHUNK (\d+)/(\d+)\](.*)", decoded_str, flags=re.DOTALL)
                 if match:
                     idx = int(match.group(1))
@@ -1801,13 +1804,11 @@ def screen_import_qr():
                 else:
                     single_payload = decoded_str
 
-        # Assemble the final payload based on what we found
         final_payload_to_process = None
         
         if single_payload:
             final_payload_to_process = single_payload
         elif total_expected and len(chunks) == total_expected:
-            # Stitch chunks back together in order
             final_payload_to_process = "".join([chunks[i] for i in range(1, total_expected + 1)])
             st.success(f"Successfully assembled {total_expected} QR Code chunks!")
         elif total_expected:
@@ -1815,7 +1816,6 @@ def screen_import_qr():
 
         if final_payload_to_process:
             instruction, queries = SocialQRMaster.extract_payload(final_payload_to_process)
-            
             if queries:
                 st.success("✅ Payload Decoded Successfully!")
                 st.markdown(f"**Question/Instruction:** {instruction or 'None'}")
@@ -1834,8 +1834,7 @@ def screen_import_qr():
             else:
                 st.error("QR Code was read, but the payload format is unrecognized.")
         elif not single_payload and not total_expected:
-            st.error("No valid QR codes found in the uploaded images.")
-
+            st.error("No valid QR codes found in the uploaded images. Make sure you extracted or uploaded the ZIP correctly.")
 
 
 # --- DESKTOP ---
