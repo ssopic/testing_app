@@ -1128,6 +1128,7 @@ class MapReduceEngine:
 ### 6. QR code generator and reader  ###
 # ==========================================
 
+
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
@@ -1284,9 +1285,9 @@ class SocialQRMaster:
             return ImageFont.load_default()
             
         # --- FIX: Safely increased the font sizes
-        title_font = get_font(int(avg_dim * 0.04), False)       # Increased from 0.045
-        warning_font = get_font(int(avg_dim * 0.04), True)      # Increased from 0.08
-        footer_font = get_font(int(avg_dim * 0.04), False)      # Increased from 0.035
+        title_font = get_font(int(avg_dim * 0.06), False)       # Increased from 0.045
+        warning_font = get_font(int(avg_dim * 0.10), True)      # Increased from 0.08
+        footer_font = get_font(int(avg_dim * 0.05), False)      # Increased from 0.035
 
         def draw_centered(text, y, font, fill=None):
             bbox = draw.textbbox((0, 0), text, font=font)
@@ -1326,6 +1327,11 @@ class SocialQRMaster:
         Public Entry Point: Returns a LIST of verified PIL Images.
         Automatically chunks large payloads dynamically based on canvas space.
         """
+        # --- NEW: Safe Truncation for custom titles ---
+        # Ensures that "Title 10/10" does not spill off the edges of the canvas
+        if len(title) > 22:
+            title = title[:19] + "..."
+            
         for q in queries: self._validate_safety(q)
         is_safe, msg = self._check_contrast(fill_color, back_color)
         if not is_safe: raise ValueError(f"Color Error: {msg}")
@@ -1354,7 +1360,7 @@ class SocialQRMaster:
         for i, chunk in enumerate(chunks):
             if total > 1:
                 chunk_payload = f"[CHUNK {i+1}/{total}]{chunk}"
-                page_title = f"{title} (Part {i+1} of {total})"
+                page_title = f"{title} {i+1}/{total}"  # --- UPDATED: New n/N format!
             else:
                 chunk_payload = chunk
                 page_title = title
@@ -1682,7 +1688,12 @@ def screen_analysis():
         # --- FIX: We bind the on_change callback here to clear old images ---
         selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()), on_change=clear_qr_cache)
         
+        # Add the text input here! Max_chars strictly enforces the UI limit
+        custom_title = st.text_input("QR Code Title:", value="Graph Analysis", max_chars=22, on_change=clear_qr_cache)
+        
         if st.button("Generate QR Code(s)", type="primary"):
+            clear_qr_cache() 
+            
             queries = get_selected_cypher_queries()
             if queries:
                 try:
@@ -1694,7 +1705,7 @@ def screen_analysis():
                         
                         img_list = qr_master.generate_batch(
                             queries=queries, 
-                            title="Graph Analysis", 
+                            title=custom_title,   # <--- Change this to use the new custom_title variable
                             instruction=analysis_data["q"],
                             fill_color="#000000",
                             back_color="#FFFFFF",
