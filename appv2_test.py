@@ -9,7 +9,7 @@ import uuid
 from collections import defaultdict
 import concurrent.futures
 import math
-
+import io
 
 # --- LangChain/Mistral/LLM Imports ---
 from langchain_mistralai import ChatMistralAI
@@ -25,6 +25,12 @@ from langchain_core.output_parsers import PydanticOutputParser
 # ---Visualization and url parsing ---
 import plotly.express as px
 import urllib.parse
+
+# ---Imports for QR code reading and generation ---
+import base64, bz2, io, qrcode, cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageColor
+
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
@@ -58,6 +64,7 @@ st.set_page_config(page_title="AI Graph Analyst", layout="wide")
 # --- OTHER CONSTANTS ---
 LLM_MODEL = "mistral-medium"
 SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
+
 
 # ==========================================
 ### 2. STATE MANAGEMENT AND UTILITIES ###
@@ -158,6 +165,19 @@ def extract_provenance_from_result(result: Union[Dict, List]) -> List[str]:
     recurse(result)
     return list(set(ids))
 
+def get_selected_cypher_queries():
+    """Helper to extract cypher queries from the currently selected locker items."""
+    if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
+        return []
+    selected = st.session_state.app_state.get("selected_ids", set())
+    queries = []
+    for entry in st.session_state.app_state["evidence_locker"]:
+        entry_ids = {str(pid) for pid in entry["ids"]}
+        if entry_ids and entry_ids.issubset(selected):
+            if "cypher" in entry and entry["cypher"]:
+                queries.append(entry["cypher"])
+    return queries
+    
 # --- DESKTOP ONLY ---
 def flatten_ids(container):
     """Recursively flattens a container of IDs (strings/ints/nested lists) into a set."""
@@ -1046,7 +1066,321 @@ class MapReduceEngine:
 
 
 # ==========================================
-### 6. SCREENS  ###
+### 6. QR code generator and reader  ###
+# ==========================================
+
+
+class SocialQRMaster:
+    """
+    The complete engine for generating Secure, Social-Media-Ready,
+    and Verified QR Codes for Neo4j AuraDB.
+    """
+
+    def __init__(self):
+        # 1. Security Filter (Read-Only)
+        self.unsafe_pattern = re.compile(
+            r'\b(CREATE|DELETE|SET|MERGE|REMOVE|DETACH|DROP|LOAD CSV|CALL)\b',
+            re.IGNORECASE
+        )
+
+    # --- SECTION A: SECURITY & COMPRESSION ---
+
+    def _validate_safety(self, query):
+        """Ensure query is Read-Only."""
+        if self.unsafe_pattern.search(query):
+            raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query[:30]}...")
+        return True
+
+    def _compress_payload(self, queries, instruction=None):
+        """
+        Structure: Instruction + "||SEP||" + Queries
+        Minify -> Join -> Bz2 -> Base64
+        """
+        cleaned_queries = [q.strip() for q in queries]
+        queries_joined = "|||".join(cleaned_queries)
+        text_part = instruction.strip() if instruction else ""
+
+        full_payload = f"{text_part}||SEP||{queries_joined}"
+        compressed = bz2.compress(full_payload.encode('utf-8'), compresslevel=9)
+        return base64.b64encode(compressed).decode('utf-8')
+
+    @staticmethod
+    def extract_payload(encoded_payload):
+        """Static Helper: Decodes the QR payload back into (instruction, queries)."""
+        try:
+            compressed = base64.b64decode(encoded_payload)
+            full_string = bz2.decompress(compressed).decode('utf-8')
+            parts = full_string.split("||SEP||", 1)
+
+            if len(parts) != 2:
+                return None, full_string.split("|||")
+
+            desc_text, queries_str = parts
+            instruction = desc_text if desc_text else None
+            queries = queries_str.split("|||")
+            return instruction, queries
+        except Exception:
+            return None, []
+
+    # --- SECTION B: COLOR SAFETY ---
+
+    def _check_contrast(self, fill_hex, back_hex):
+        """Calculates luminance to ensure scanner readability."""
+        def get_lum(hex_code):
+            rgb = ImageColor.getrgb(hex_code)
+            return (0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]) / 255.0
+
+        lum_fill = get_lum(fill_hex)
+        lum_back = get_lum(back_hex)
+
+        if lum_fill > lum_back:
+            return False, "INVERTED: Dots must be darker than background."
+        if (lum_back - lum_fill) < 0.4:
+            return False, "LOW CONTRAST: Colors are too similar."
+        return True, "OK"
+
+    # --- SECTION C: RAM-OPTIMIZED VERIFICATION ---
+
+    def _verify_readability(self, pil_img, original_data):
+        """Simulates social media destruction and attempts to read the code."""
+        import cv2
+        import numpy as np
+
+        def run_test(img_to_test):
+            # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1500px short side)
+            target_short_side = 1500
+            w, h = img_to_test.size
+
+            if min(w, h) > target_short_side:
+                ratio = target_short_side / min(w, h)
+                new_size = (int(w * ratio), int(h * ratio))
+                small_img = img_to_test.resize(new_size, Image.Resampling.LANCZOS)
+            else:
+                small_img = img_to_test
+
+            # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
+            buffer = io.BytesIO()
+            small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+            buffer.seek(0)
+
+            # 3. Decode with OpenCV
+            file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
+            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+            detector = cv2.QRCodeDetector()
+            
+            # Helper to test both Single and Multi detection
+            def test_decoding(image_array):
+                # Try Multi
+                retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
+                if retval and decoded_info:
+                    for info in decoded_info:
+                        if info == original_data:
+                            return True
+                # Try Single
+                retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
+                if retval and decoded_info == original_data:
+                    return True
+                return False
+
+            # 4. Validate Data Integrity
+            if test_decoding(cv_img): return True
+                        
+            # 5. OpenCV is brittle with text/compression. Try a grayscale threshold fallback.
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            if test_decoding(gray): return True
+            
+            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            if test_decoding(thresh): return True
+            
+            return False
+
+        # Strictly test the composite image to guarantee real-world app compatibility
+        return run_test(pil_img)
+
+    # --- MAIN GENERATOR ---
+
+    def generate(self, queries, title, instruction=None, fill_color="black", back_color="white",
+                 width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None):
+        """Main entry point. Returns PIL Image or raises ValueError."""
+
+        if len(title) > 30:
+            title = title[:27] + "..."
+
+        for q in queries:
+            self._validate_safety(q)
+
+        is_safe, msg = self._check_contrast(fill_color, back_color)
+        if not is_safe:
+            raise ValueError(f"Color Error: {msg}")
+
+        # Compress Payload
+        payload = self._compress_payload(queries, instruction)
+
+        # ADAPTIVE ERROR CORRECTION:
+        # Step down from 30% redundancy (H) to 25% (Q) for larger payloads.
+        ec_level = qrcode.constants.ERROR_CORRECT_H
+        if len(payload) > 550:
+            ec_level = qrcode.constants.ERROR_CORRECT_Q
+            print("INFO: Large payload detected. Utilizing Adaptive Density (EC Level Q).")
+
+        qr = qrcode.QRCode(
+            error_correction=ec_level,
+            box_size=1, # <--- FIX: Start at exactly 1 pixel per module
+            border=4,
+        )
+        qr.add_data(payload)
+        qr.make(fit=True)
+
+        qr_img = qr.make_image(fill_color=fill_color, back_color=back_color).convert('RGB')
+        final_img = Image.new('RGB', (width, height), back_color)
+        draw = ImageDraw.Draw(final_img)
+
+        # --- DYNAMIC LAYOUT ---
+        # Fonts need to scale based off of both the width and height as we have difering oens for each social media
+        avg_dim = (width + height) // 2
+
+        # Defnes the sizes of the font compared to the average dimension
+        target_primary_size = int(avg_dim * 0.08)
+        target_secondary_size = int(avg_dim * 0.045)
+        target_footer_size = int(avg_dim * 0.035)
+
+        def get_fitting_font(text, max_size, max_width, is_bold=False):
+            """Returns the largest font possible that fits within max_width, tracking OS fallbacks."""
+            # Cross-platform font fallback list (Windows, Mac, Linux)
+            fonts_to_try = [
+                "arialbd.ttf" if is_bold else "arial.ttf",
+                "Arial Bold.ttf" if is_bold else "Arial.ttf",
+                "DejaVuSans-Bold.ttf" if is_bold else "DejaVuSans.ttf",
+                "LiberationSans-Bold.ttf" if is_bold else "LiberationSans-Regular.ttf"
+            ]
+
+            font = None
+            size = max_size
+            font_path_used = None
+
+            # Find the first scalable font available on the host system
+            for font_name in fonts_to_try:
+                try:
+                    font = ImageFont.truetype(font_name, size)
+                    font_path_used = font_name
+                    break
+                except IOError:
+                    continue
+
+            if font is None:
+                print("WARNING: No scalable fonts found on your system. Text will remain tiny.")
+                return ImageFont.load_default(), max_size
+
+            # Shrink font dynamically until it perfectly fits horizontal bounds
+            while size > 12:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                if text_width <= max_width:
+                    break
+                size -= 2
+                font = ImageFont.truetype(font_path_used, size)
+            return font, size
+
+        # Initialize the fonts here. These depend on the sizes defined above
+        title_font, actual_title_size = get_fitting_font(title, target_secondary_size, width * 0.9, is_bold=False)
+        warning_font, actual_warning_size = get_fitting_font("Don't trust me blindly!", target_primary_size, width * 0.9, is_bold=True)
+        action_font, actual_action_size = get_fitting_font("See For Yourself", target_primary_size, width * 0.9, is_bold=True)
+
+        footer_font, actual_footer_size = get_fitting_font(app_address, target_footer_size, width * 0.6)
+
+        bg_lum = (0.299*ImageColor.getrgb(back_color)[0] + 0.587*ImageColor.getrgb(back_color)[1] + 0.114*ImageColor.getrgb(back_color)[2])
+        text_color = "white" if bg_lum < 128 else "black"
+
+        def draw_centered(text, y, font):
+            bbox = draw.textbbox((0, 0), text, font=font)
+            w = bbox[2] - bbox[0]
+            draw.text(((width - w) // 2, y), text, fill=text_color, font=font)
+
+        # ADAPTIVE SIZING: Cap the height slightly so we always have room for the text above and below
+        qr_display_size = int(min(width * 0.85, height * 0.55))
+        
+        # --- FIX: Ensure integer scaling to prevent OpenCV detection failure ---
+        # OpenCV fails if modules are unevenly scaled. We lock the size to an exact multiple.
+        # Since box_size is 1, the image size is exactly the total number of modules!
+        total_modules = qr_img.size[0]
+        pixels_per_module = max(1, qr_display_size // total_modules)
+        optimal_display_size = pixels_per_module * total_modules
+        
+        # Because the source image is 1 pixel per module, NEAREST scaling is mathematically perfect.
+        qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
+
+        # Calculate exactly where the QR code will sit (perfectly centered)
+        qr_y_pos = (height - optimal_display_size) // 2
+        qr_x_pos = (width - optimal_display_size) // 2
+
+        # Calculate a proportional gap for spacing between the text and the QR code
+        # Increased gap to ensure the layout text does not touch the QR code's quiet zone
+        gap = int(min(width, height) * 0.08)
+
+        # --- Draw Header Elements ---
+        # We start just above the QR code and stack upwards to ensure perfect spacing
+        bottom_of_header = qr_y_pos - gap
+
+        # Draw Title right above the QR code
+        title_y = bottom_of_header - actual_title_size
+        draw_centered(title, title_y, title_font)
+        bottom_of_header = title_y - (gap // 2)
+
+        # Draw Warning right above the Title
+        warning_y = bottom_of_header - actual_warning_size
+        draw_centered("Don't trust me blindly!", warning_y, warning_font)
+
+        # Paste QR
+        final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
+
+        # --- Draw Footer Elements ---
+        footer_text_y = qr_y_pos + optimal_display_size + gap
+        draw_centered("See For Yourself", footer_text_y, action_font)
+
+        # Add the app footer directly below the previous text
+        footer_y = footer_text_y + actual_action_size + gap
+        logo_size = int(actual_footer_size * 1.5)
+        addr_bbox = draw.textbbox((0, 0), app_address, font=footer_font)
+        addr_width = addr_bbox[2] - addr_bbox[0]
+        total_footer_width = logo_size + 15 + addr_width
+        footer_start_x = (width - total_footer_width) // 2
+
+        if logo_path:
+            try:
+                logo = Image.open(logo_path).convert("RGBA")
+                logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
+                final_img.paste(logo, (footer_start_x, footer_y), logo)
+            except:
+                draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
+        else:
+            draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
+
+        draw.text((footer_start_x + logo_size + 15, footer_y + (logo_size - actual_footer_size)//2),
+                  app_address, fill=text_color, font=footer_font)
+
+        # Step 5: THE GAUNTLET (Verification with Smart Error Messaging)
+        if not self._verify_readability(final_img, payload):
+             if len(payload) > 500:
+                 raise ValueError(
+                    f"Quality Check Failed: Too much data ({len(payload)} chars compressed). "
+                    "The QR code dots are too small to survive social media compression. "
+                    "Please reduce the number of queries or shorten your description."
+                 )
+             else:
+                 raise ValueError(
+                    "Quality Check Failed: This color combination is unreadable "
+                    "by standard scanners. Please use higher contrast colors."
+                 )
+
+        print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
+        return final_img
+
+
+                     
+
+# ==========================================
+### 7. SCREENS  ###
 # ==========================================
 
 # --- SHARED ---
@@ -1213,6 +1547,20 @@ def screen_locker():
 
 
 @st.fragment
+def get_selected_cypher_queries():
+    """Helper to extract cypher queries from the currently selected locker items."""
+    if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
+        return []
+    selected = st.session_state.app_state.get("selected_ids", set())
+    queries = []
+    for entry in st.session_state.app_state["evidence_locker"]:
+        entry_ids = {str(pid) for pid in entry["ids"]}
+        if entry_ids and entry_ids.issubset(selected):
+            if "cypher" in entry and entry["cypher"]:
+                queries.append(entry["cypher"])
+    return queries
+
+@st.fragment
 def screen_analysis():
     st.title("Analysis Pane")
     
@@ -1222,18 +1570,21 @@ def screen_analysis():
         st.warning("No documents selected.")
         return
     
+    # --- NEW: Clear previous analysis if selected documents change ---
+    current_ids_sorted = sorted(ids)
+    if st.session_state.get("last_analysis_ids") != current_ids_sorted:
+        st.session_state.last_analysis = None
+        st.session_state.last_analysis_ids = current_ids_sorted
+    
     # Ensure data is loaded
     if 'github_data' not in st.session_state:
-        # Assuming load_github_data is available in the main scope or imported
-        # For this file context, we assume it's loaded. 
-        # In real integration, import load_github_data from current.py
         pass 
         
     df = st.session_state.github_data
     matched = df[df['PK'].isin(ids)]
     st.subheader(f"Analyzing {len(matched)} Documents")
 
-    # 2. Document Reader (Preserved from original)
+    # 2. Document Reader
     doc_options = matched['Bates_Identity'].tolist()
     selected_bates = st.selectbox("Select Document to Read:", options=doc_options)
     
@@ -1247,7 +1598,16 @@ def screen_analysis():
     st.divider()
     st.write("### Agentic Analysis")
     
+    # --- NEW: Check for auto-triggered question from QR Import ---
+    auto_q = st.session_state.pop("auto_trigger_question", None)
+    
     q = st.chat_input("Ask about this evidence set:")
+    
+    # Override 'q' if we have an auto-trigger
+    if auto_q:
+        q = auto_q
+        with st.chat_message("user"): 
+            st.write(f"*(Auto-Triggered from QR)*: {q}")
     
     if q:
         api_key = st.session_state.app_state.get("mistral_key", "")
@@ -1256,9 +1616,7 @@ def screen_analysis():
             return
 
         # Initialize Engine
-        # We instantiate here. In production, we might cache this object, 
-        # but for now, it's lightweight.
-        engine = MapReduceEngine(api_key=api_key)
+        engine = MapReduceEngine(api_key=api_key) # Assuming MapReduceEngine is in scope
         
         # Prepare Docs for the Engine
         docs_payload = []
@@ -1269,8 +1627,6 @@ def screen_analysis():
             })
 
         # --- THE PIPELINE UI ---
-        
-        # We use st.status to give the user that "constant change" feedback
         with st.status("Initializing Agent Swarm...", expanded=True) as status:
             
             # Step A: The Gatekeeper
@@ -1278,12 +1634,9 @@ def screen_analysis():
             st.write(f"🧠 Gatekeeper Decision: **{strategy}** Mode")
             
             if strategy == "DIRECT":
-                # Fallback to simple logic for small context
                 status.update(label="Running Direct Analysis...", state="running")
-                # Simple concatenation
                 context = "\n".join([f"Doc: {d['Bates_Identity']}\n{d['Body']}" for d in docs_payload])
                 
-                # Use the 'reduce' llm for a direct answer
                 from langchain_core.prompts import ChatPromptTemplate
                 prompt = ChatPromptTemplate.from_template("Context: {context}\n\nQuestion: {q}")
                 chain = prompt | engine.llm_reduce
@@ -1293,42 +1646,235 @@ def screen_analysis():
 
             else:
                 # MAP-REDUCE STRATEGY
-                
-                # Step B: The Architect
                 status.write("🏗️ Architect is analyzing your question...")
                 extraction_goal = engine.architect_query(q)
                 status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
                 
-                # Step C: Parallel Map
                 status.update(label="Agents are scanning documents...", state="running")
                 status.write(f"🚀 Spawning {len(docs_payload)} extraction agents...")
                 
-                # This function updates the status label as it runs
                 facts = engine.run_parallel_map(docs_payload, extraction_goal, status_container=status)
                 
                 relevant_count = sum(1 for f in facts if f.has_relevant_info)
                 status.write(f"✅ Extraction complete. Found relevant info in {relevant_count} documents.")
                 
-                # Step D: Reduce
                 status.update(label="Synthesizing Final Answer...", state="running")
                 final_answer = engine.reduce_facts(facts, q)
                 status.update(label="Analysis Complete", state="complete", expanded=False)
 
-        # 4. Display Result
-        if final_answer:
-            st.info(final_answer)
-            
-            # Optional: Show citations/sources if in Map-Reduce mode
-            if strategy == "MAP_REDUCE" and 'facts' in locals():
-                with st.expander("View Source Citations"):
-                    for f in facts:
-                        if f.has_relevant_info:
-                            st.markdown(f"**{f.doc_id}**")
-                            st.caption(f"Reasoning: {f.extracted_summary}")
-                            for quote in f.relevant_quotes:
-                                st.text(f"\"{quote}\"")
-                            st.divider()
+        # --- NEW: Save to session state so it survives button clicks ---
+        st.session_state.last_analysis = {
+            "q": q,
+            "final_answer": final_answer,
+            "strategy": strategy,
+            "facts": facts if strategy == "MAP_REDUCE" else []
+        }
 
+    # 4. Display Result & QR Generation (Now outside the 'if q:' block)
+    if st.session_state.get("last_analysis"):
+        analysis_data = st.session_state.last_analysis
+        st.info(analysis_data["final_answer"])
+        
+        if analysis_data["strategy"] == "MAP_REDUCE" and analysis_data.get("facts"):
+            with st.expander("View Source Citations"):
+                for f in analysis_data["facts"]:
+                    if f.has_relevant_info:
+                        st.markdown(f"**{f.doc_id}**")
+                        st.caption(f"Reasoning: {f.extracted_summary}")
+                        for quote in f.relevant_quotes:
+                            st.text(f"\"{quote}\"")
+                        st.divider()
+        
+        # --- NEW: QR Generation with Preset Sizes ---
+        st.divider()
+        st.write("### 🔗 Share Analysis (QR Code)")
+        
+        # Define the preset sizes for social media sharing
+        qr_presets = {
+            "Instagram / TikTok Story (1080 x 1920)": (1080, 1920),
+            "Square Feed Post (1080 x 1080)": (1080, 1080),
+            "X / LinkedIn Post (1200 x 675)": (1200, 675)
+        }
+        
+        # Dropdown for preset selection
+        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()))
+        
+        if st.button("Generate QR Code", type="primary"):
+            queries = get_selected_cypher_queries()
+            
+            # Debugging Output
+            with st.expander("🔍 View Data Payload Details", expanded=False):
+                st.markdown(f"**Instruction:** {analysis_data.get('q', 'None')}")
+                if not queries:
+                    st.write("No queries found.")
+                for idx, qry in enumerate(queries):
+                    st.markdown(f"**Query {idx + 1}**")
+                    st.code(qry, language="cypher")
+                    st.divider()
+                    st.code(analysis_data["q"])
+
+            if queries:
+                try:
+                    with st.spinner(f"Generating secure QR code ({selected_preset})..."):
+                        qr_master = SocialQRMaster()
+                        width, height = qr_presets[selected_preset]
+                        
+                        # Generate the QR with the specific size parameters
+                        qr_img = qr_master.generate(
+                            queries=queries, 
+                            title="Graph Analysis", 
+                            instruction=analysis_data["q"],
+                            width=width,
+                            height=height,
+                            fill_color="#000000",
+                            back_color="#FFFFFF",
+                            app_address="silvios.ai"
+                        )
+                        
+                        # Save to buffer and convert to bytes
+                        buf = io.BytesIO()
+                        qr_img.save(buf, format="PNG")
+                        img_bytes = buf.getvalue()
+                        
+                        # Store in session state to prevent disappearance on download
+                        st.session_state.generated_qr_bytes = img_bytes
+                        st.session_state.generated_qr_size = f"{width}x{height}"
+                        
+                except Exception as e:
+                    st.error(f"Failed to generate QR: {e}")
+            else:
+                st.warning("No Cypher queries found in the selected evidence to share.")
+                
+        # Display the generated image and the download button securely from session state
+        if "generated_qr_bytes" in st.session_state:
+            st.success("QR Code generated successfully!")
+            st.image(st.session_state.generated_qr_bytes, caption=f"Scan to import this analysis ({st.session_state.generated_qr_size})")
+            
+            # Native Streamlit download button
+            st.download_button(
+                label="⬇️ Download Image",
+                data=st.session_state.generated_qr_bytes,
+                file_name=f"graph_analysis_qr_{st.session_state.generated_qr_size}.png",
+                mime="image/png",
+                use_container_width=True
+            )
+
+#teh process_imorted_qr can be moved to the helper functions part    
+def process_imported_qr(queries, instruction, analyze_now):
+    """Helper to run the queries, fetch IDs, and update state."""
+    # Note: Assumes get_db_driver() and extract_provenance_from_result() are available in scope
+    driver = get_db_driver() 
+    if not driver:
+        st.error("Not connected to database.")
+        return
+        
+    all_found_ids = set()
+    with st.spinner("Executing imported Cypher queries against the database..."):
+        with driver.session() as session:
+            for q in queries:
+                try:
+                    res = session.run(q)
+                    data = [r.data() for r in res]
+                    all_found_ids.update(extract_provenance_from_result(data))
+                except Exception as e:
+                    st.warning(f"A query failed to execute: {e}")
+
+    if not all_found_ids:
+        st.warning("Queries ran, but no matching documents were found in the current database.")
+        return
+
+    # Create payload for the locker
+    payload = {
+        "query": f"Imported QR: {instruction or 'Custom Analysis'}",
+        "answer": "Imported via QR Code",
+        "ids": list(all_found_ids),
+        "cypher": " \nUNION\n ".join(queries) # Combine for display
+    }
+    
+    st.session_state.app_state["evidence_locker"].append(payload)
+    
+    if analyze_now:
+        # Deselect all, then select only the newly imported IDs
+        st.session_state.app_state["selected_ids"] = set(all_found_ids)
+        
+        # Set a flag to trigger the swarm engine automatically in screen_analysis
+        if instruction:
+            st.session_state.auto_trigger_question = instruction
+        
+        st.session_state.current_page = "Analysis"
+        st.rerun()
+    else:
+        st.toast("✅ Saved to Evidence Locker!")
+
+@st.fragment
+def screen_import_qr():
+    st.title("Import Analysis (QR)")
+    st.write("Upload or scan a generated QR code to instantly retrieve the context and run the analysis.")
+    
+    upload = st.file_uploader("Upload QR Code Image", type=["png", "jpg", "jpeg"])
+    camera = st.camera_input("Or Scan with Camera")
+    
+    img_bytes = upload.getvalue() if upload else (camera.getvalue() if camera else None)
+    
+    if img_bytes:
+        # Decode QR using OpenCV
+        file_bytes = np.asarray(bytearray(img_bytes), dtype=np.uint8)
+        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
+        detector = cv2.QRCodeDetector()
+        
+        # Robust decoding function to match the verification gauntlet
+        def extract_qr_string(image_array):
+            # Try Multi-detect
+            retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
+            if retval and decoded_info and any(decoded_info):
+                return [info for info in decoded_info if info][0]
+            
+            # Try Single-detect
+            retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
+            if retval and decoded_info:
+                return decoded_info
+                
+            return None
+
+        # 1. Try standard color image
+        decoded_str = extract_qr_string(cv_img)
+        
+        # 2. Try Grayscale fallback (combats compression artifacts)
+        if not decoded_str:
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            decoded_str = extract_qr_string(gray)
+            
+        # 3. Try Binary Threshold fallback (combats bad lighting/low contrast)
+        if not decoded_str:
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            decoded_str = extract_qr_string(thresh)
+            
+        if decoded_str:
+            # Assumes SocialQRMaster is in scope
+            instruction, queries = SocialQRMaster.extract_payload(decoded_str)
+            
+            if queries:
+                st.success("✅ QR Code Decoded Successfully!")
+                st.markdown(f"**Question/Instruction:** {instruction or 'None'}")
+                with st.expander("View Embedded Cypher Queries"):
+                    for q in queries: st.code(q, language="cypher")
+                
+                # User Choice
+                st.divider()
+                st.write("How would you like to proceed?")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Yes, Proceed with Analysis", type="primary", use_container_width=True):
+                        process_imported_qr(queries, instruction, analyze_now=True)
+                with col2:
+                    if st.button("No, Just Save to Locker", use_container_width=True):
+                        process_imported_qr(queries, instruction, analyze_now=False)
+            else:
+                st.error("QR Code was read, but the payload format is unrecognized. Are you sure this is from Graph Analyst?")
+        else:
+            st.error("No valid QR code found in the image. Please ensure the code is clear, well-lit, and fully visible.")
 # --- DESKTOP ---
 
 @st.fragment
@@ -2314,7 +2860,104 @@ def show_settings_dialog():
 #######################################################################
 # --- 9. GLOBAL UI COMPONENTS AND CSS(THEME, CUSTOM CSS INJECTION) ---
 ######################################################################
-#WELCOME BUTTON
+#WELCOME BUTTON AND TEXT
+WELCOME_TEXT="""
+Terms of Use and Legal Disclaimer
+
+Last Updated: February 15, 2026
+
+1. Nature of the Project & Age Restriction
+
+1.1. Portfolio Demonstration Only
+This application ("AI Graph Analyst") is a portfolio project created solely for educational and demonstration purposes. It is designed to showcase technical capabilities in GraphRAG (Retrieval Augmented Generation), AI-driven document analysis, and data visualization. It is NOT a commercial product, a legal investigation tool, or an official source of government information.
+
+1.2. 18+ Age Requirement (Sensitive Content)
+This application processes and visualizes data from the "Epstein Documents" and House Oversight Committee releases. These documents contain explicit descriptions of sexual abuse, crimes involving minors, and other disturbing content.
+
+By accessing this application, you certify that you are at least 18 years of age (or the age of majority in your jurisdiction).
+
+Access by minors is strictly prohibited.
+
+2. Disclaimer of Data Accuracy (The "Public Record" Clause)
+
+The data visualized in this application is derived from publicly available government documents.
+
+No Guarantee of Accuracy: Errors may occur during data cleaning (OCR), ingestion, or processing.
+
+Contextual Limitations: A connection in the graph (e.g., "MENTIONED_IN") does not imply guilt, criminal association, or verified personal relationships. It simply indicates that two terms appear structurally linked in the raw text.
+
+Source Material: Users are strictly advised to verify any findings against the original, official source documents provided by the United States Government. This tool is a secondary visualization aid, not a primary source.
+
+3. AI and Large Language Model (LLM) Warning
+
+This application utilizes Artificial Intelligence (Mistral AI) to interpret text.
+
+Risk of Hallucination: Generative AI can fabricate information. The AI may misinterpret a relationship, invent a citation, or misquote a document.
+
+No Human Review: The outputs are automated and have not been reviewed by human editors.
+
+User Responsibility: You accept that any summary, graph, or answer provided by the AI is a probabilistic generation, not a verified fact.
+
+4. Limitation of Liability
+
+TO THE FULLEST EXTENT PERMITTED BY LAW:
+
+"As Is" Service: The software is provided "AS IS", without warranty of any kind.
+
+No Liability for Damages: The Developer shall not be liable for any direct, indirect, incidental, special, or consequential damages (including reputational harm, loss of data, or legal reliance) arising from the use of this application.
+
+Service Interruptions: We do not guarantee uptime or data persistence.
+
+5. User Conduct & Indemnification
+
+5.1. Prohibited Acts
+You agree NOT to:
+
+Use outputs to harass, defame, or doxx individuals.
+
+Present AI "theories" as verified fact in public forums.
+
+Input prompts that violate the Acceptable Use Policy of our AI provider (Mistral AI), including generating non-consensual sexual content or hate speech.
+
+5.2. Indemnification (The "You Pay if You Break It" Clause)
+You agree to indemnify, defend, and hold harmless the Developer from any claims, liabilities, damages, and expenses (including legal fees) arising from your use of the application, your violation of these Terms, or your violation of any rights of a third party (e.g., posting a defamatory screenshot).
+
+6. Intellectual Property
+
+The underlying code is the intellectual property of the Developer. The underlying data remains in the public domain or subject to original copyright.
+
+7. Privacy and Cookie Policy (EU/GDPR)
+
+7.1. No Direct Data Collection: The Developer does not create accounts or store PII.
+7.2. Hosting (Streamlit/Snowflake): Essential cookies are used by the host for site function.
+7.3. AI Processing: Inputs are sent to Mistral AI for processing. The Developer may review anonymized logs for debugging.
+7.4. Consent: By using the app, you consent to this processing.
+
+8. Modifications
+
+We reserve the right to modify these terms or the application features at any time without notice.
+
+9. Contact & Right to Erasure (GDPR/Accuracy)
+
+We respect individual privacy and data accuracy.
+
+Technical Corrections: If you identify a factual error in the graph structure (e.g., the AI hallucinated a link that does not exist in the source text), please report it. We prioritize fixing technical inaccuracies.
+
+GDPR Rights: EU citizens have the right to request erasure of personal data under specific conditions. While public interest exceptions may apply to government records, we will review all removal requests in compliance with applicable law.
+
+Contact: Please direct requests to the repository owner via [GitHub Issues] at ssopic.
+
+10. Governing Law & Dispute Resolution
+
+10.1. Jurisdiction
+These Terms shall be governed by and construed in accordance with the laws of The Republic of Croatia (or applicable EU law), without regard to its conflict of law provisions.
+
+10.2. Exclusive Venue
+Any legal action or proceeding arising under these Terms shall be brought exclusively in the competent courts located in Croatia. You hereby consent to the jurisdiction of such courts and waive any objection regarding venue (e.g., claiming it is an "inconvenient forum").
+
+By clicking "Get Started," you acknowledge you are 18+ and agree to these Terms.
+"""
+
 @st.dialog("Welcome")
 def show_welcome_popup():
     # 2. Add welcome pop up
@@ -2703,8 +3346,7 @@ def main():
     # --- LEFT COLUMN (Input & Config) ---
     with c_left:
         st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Find Evidence and add to cart</b></div>", unsafe_allow_html=True)
-        st.markdown(accent_line, unsafe_allow_html=True)
-        
+        st.markdown(accent_line, unsafe_allow_html=True) # Assuming accent_line is defined in your main file
         
         # Navigation Buttons (Using callbacks for single-click nav)
         st.button("Find Evidence Manually",  use_container_width=True, 
@@ -2712,6 +3354,10 @@ def main():
             
         st.button("Find Evidence via Chat or Cypher", use_container_width=True,
                   on_click=set_page, args=("Find Evidence via Chat or Cypher",))
+
+        # --- NEW BUTTON: Import Analysis (QR) ---
+        st.button("Import Analysis (QR)", use_container_width=True,
+                  on_click=set_page, args=("Import QR",))
 
         # Vertical Spacer to push Config to bottom
         st.markdown("<br>"*10, unsafe_allow_html=True)
@@ -2736,6 +3382,9 @@ def main():
                 screen_locker()
             elif current == "Analysis":
                 screen_analysis()
+            # --- NEW ROUTE: Display the QR screen ---
+            elif current == "Import QR":
+                screen_import_qr()
             else:
                 st.error(f"Unknown page: {current}")
 
@@ -2744,16 +3393,19 @@ def main():
         st.markdown("<div style='text-align: center; font-size: 1.3em;'><b>Select from Cart and Analyze</b></div>", unsafe_allow_html=True)
         st.markdown(accent_line, unsafe_allow_html=True)
         
-        
         # Locker Badge Calculation
         locker_count = len(st.session_state.app_state["evidence_locker"])
         badge = f" ({locker_count})" if locker_count > 0 else ""
         
-        st.button(f"Evidence Cart",  use_container_width=True,
+        st.button(f"Evidence Cart{badge}",  use_container_width=True,
                   on_click=set_page, args=("Evidence Cart",))
             
         st.button("Analysis",  use_container_width=True,
                   on_click=set_page, args=("Analysis",))
+
+# --- Standard Python Runner ---
+if __name__ == "__main__":
+    main()
             
 
 ### RELATIONSHIP DEFINITONS ##
@@ -2815,104 +3467,3 @@ RELATIONSHIP_DEFINITIONS= {
     "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities.",
     "MENTIONED_IN": "In which document is the entity mentioned. CTRL+F"
 }
-
-
-WELCOME_TEXT="""
-Terms of Use and Legal Disclaimer
-
-Last Updated: February 15, 2026
-
-1. Nature of the Project & Age Restriction
-
-1.1. Portfolio Demonstration Only
-This application ("AI Graph Analyst") is a portfolio project created solely for educational and demonstration purposes. It is designed to showcase technical capabilities in GraphRAG (Retrieval Augmented Generation), AI-driven document analysis, and data visualization. It is NOT a commercial product, a legal investigation tool, or an official source of government information.
-
-1.2. 18+ Age Requirement (Sensitive Content)
-This application processes and visualizes data from the "Epstein Documents" and House Oversight Committee releases. These documents contain explicit descriptions of sexual abuse, crimes involving minors, and other disturbing content.
-
-By accessing this application, you certify that you are at least 18 years of age (or the age of majority in your jurisdiction).
-
-Access by minors is strictly prohibited.
-
-2. Disclaimer of Data Accuracy (The "Public Record" Clause)
-
-The data visualized in this application is derived from publicly available government documents.
-
-No Guarantee of Accuracy: Errors may occur during data cleaning (OCR), ingestion, or processing.
-
-Contextual Limitations: A connection in the graph (e.g., "MENTIONED_IN") does not imply guilt, criminal association, or verified personal relationships. It simply indicates that two terms appear structurally linked in the raw text.
-
-Source Material: Users are strictly advised to verify any findings against the original, official source documents provided by the United States Government. This tool is a secondary visualization aid, not a primary source.
-
-3. AI and Large Language Model (LLM) Warning
-
-This application utilizes Artificial Intelligence (Mistral AI) to interpret text.
-
-Risk of Hallucination: Generative AI can fabricate information. The AI may misinterpret a relationship, invent a citation, or misquote a document.
-
-No Human Review: The outputs are automated and have not been reviewed by human editors.
-
-User Responsibility: You accept that any summary, graph, or answer provided by the AI is a probabilistic generation, not a verified fact.
-
-4. Limitation of Liability
-
-TO THE FULLEST EXTENT PERMITTED BY LAW:
-
-"As Is" Service: The software is provided "AS IS", without warranty of any kind.
-
-No Liability for Damages: The Developer shall not be liable for any direct, indirect, incidental, special, or consequential damages (including reputational harm, loss of data, or legal reliance) arising from the use of this application.
-
-Service Interruptions: We do not guarantee uptime or data persistence.
-
-5. User Conduct & Indemnification
-
-5.1. Prohibited Acts
-You agree NOT to:
-
-Use outputs to harass, defame, or doxx individuals.
-
-Present AI "theories" as verified fact in public forums.
-
-Input prompts that violate the Acceptable Use Policy of our AI provider (Mistral AI), including generating non-consensual sexual content or hate speech.
-
-5.2. Indemnification (The "You Pay if You Break It" Clause)
-You agree to indemnify, defend, and hold harmless the Developer from any claims, liabilities, damages, and expenses (including legal fees) arising from your use of the application, your violation of these Terms, or your violation of any rights of a third party (e.g., posting a defamatory screenshot).
-
-6. Intellectual Property
-
-The underlying code is the intellectual property of the Developer. The underlying data remains in the public domain or subject to original copyright.
-
-7. Privacy and Cookie Policy (EU/GDPR)
-
-7.1. No Direct Data Collection: The Developer does not create accounts or store PII.
-7.2. Hosting (Streamlit/Snowflake): Essential cookies are used by the host for site function.
-7.3. AI Processing: Inputs are sent to Mistral AI for processing. The Developer may review anonymized logs for debugging.
-7.4. Consent: By using the app, you consent to this processing.
-
-8. Modifications
-
-We reserve the right to modify these terms or the application features at any time without notice.
-
-9. Contact & Right to Erasure (GDPR/Accuracy)
-
-We respect individual privacy and data accuracy.
-
-Technical Corrections: If you identify a factual error in the graph structure (e.g., the AI hallucinated a link that does not exist in the source text), please report it. We prioritize fixing technical inaccuracies.
-
-GDPR Rights: EU citizens have the right to request erasure of personal data under specific conditions. While public interest exceptions may apply to government records, we will review all removal requests in compliance with applicable law.
-
-Contact: Please direct requests to the repository owner via [GitHub Issues] at ssopic.
-
-10. Governing Law & Dispute Resolution
-
-10.1. Jurisdiction
-These Terms shall be governed by and construed in accordance with the laws of The Republic of Croatia (or applicable EU law), without regard to its conflict of law provisions.
-
-10.2. Exclusive Venue
-Any legal action or proceeding arising under these Terms shall be brought exclusively in the competent courts located in Croatia. You hereby consent to the jurisdiction of such courts and waive any objection regarding venue (e.g., claiming it is an "inconvenient forum").
-
-By clicking "Get Started," you acknowledge you are 18+ and agree to these Terms.
-"""
-if __name__ == "__main__":
-    main()
-    
