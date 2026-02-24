@@ -1268,9 +1268,9 @@ class SocialQRMaster:
             try: return ImageFont.truetype("arialbd.ttf" if is_bold else "arial.ttf", max_size)
             except: return ImageFont.load_default()
             
-        title_font = get_font(int(avg_dim * 0.045), False)
-        warning_font = get_font(int(avg_dim * 0.08), True)
-        footer_font = get_font(int(avg_dim * 0.035), False)
+        title_font = get_font(int(avg_dim * 0.1), False)
+        warning_font = get_font(int(avg_dim * 0.1), True)
+        footer_font = get_font(int(avg_dim * 0.1), False)
 
         def draw_centered(text, y, font, fill=None):
             bbox = draw.textbbox((0, 0), text, font=font)
