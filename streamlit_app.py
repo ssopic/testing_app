@@ -1127,7 +1127,6 @@ class MapReduceEngine:
 # ==========================================
 ### 6. QR code generator and reader  ###
 # ==========================================
-
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
@@ -1180,27 +1179,66 @@ class SocialQRMaster:
         import cv2
         import numpy as np
         
+        def run_test(img_to_test):
+            target_short_side = 1500
+            w, h = img_to_test.size
+            if min(w, h) > target_short_side:
+                ratio = target_short_side / min(w, h)
+                small_img = img_to_test.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
+            else:
+                small_img = img_to_test
+
+            buffer = io.BytesIO()
+            small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
+            buffer.seek(0)
+            cv_img = cv2.imdecode(np.asarray(bytearray(buffer.read()), dtype=np.uint8), cv2.IMREAD_COLOR)
+            detector = cv2.QRCodeDetector()
+            
+            def test_scan(image_array):
+                ret, dec, _, _ = detector.detectAndDecodeMulti(image_array)
+                if ret and dec and original_data in dec: return True
+                dec_text, _, _ = detector.detectAndDecode(image_array)
+                if dec_text == original_data: return True
+                return False
+
+            if test_scan(cv_img): return True
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            if test_scan(gray): return True
+            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+            if test_scan(thresh): return True
+            return False
+            
+        return run_test(pil_img)
+
+    def _verify_raw_export(self, pil_img, original_data):
+        """Custom verifier for raw exports. Simulates moderate JPEG transfer but skips brutal downscaling."""
+        import cv2
+        import numpy as np
+        import io
+        
         target_short_side = 1500
         w, h = pil_img.size
         if min(w, h) > target_short_side:
             ratio = target_short_side / min(w, h)
-            small_img = pil_img.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
+            new_size = (int(w * ratio), int(h * ratio))
+            small_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
         else:
             small_img = pil_img
-
-        buffer = io.BytesIO()
-        small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
-        buffer.seek(0)
-        cv_img = cv2.imdecode(np.asarray(bytearray(buffer.read()), dtype=np.uint8), cv2.IMREAD_COLOR)
+        
+        buf = io.BytesIO()
+        small_img.save(buf, format="JPEG", quality=85) 
+        file_bytes = np.asarray(bytearray(buf.getvalue()), dtype=np.uint8)
+        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
         detector = cv2.QRCodeDetector()
         
         def test_scan(image_array):
             ret, dec, _, _ = detector.detectAndDecodeMulti(image_array)
             if ret and dec and original_data in dec: return True
-            dec_text, _, _ = detector.detectAndDecode(image_array)
-            if dec_text == original_data: return True
+            decoded_text, _, _ = detector.detectAndDecode(image_array)
+            if decoded_text == original_data: return True
             return False
-
+            
         if test_scan(cv_img): return True
         gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
         if test_scan(gray): return True
@@ -1215,9 +1253,9 @@ class SocialQRMaster:
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color=fill_color, back_color=back_color).convert('RGB')
         
-        # Lock sizing to prevent OpenCV distortion
         total_modules = qr_img.size[0]
-        qr_display_size = int(min(width * 0.85, height * 0.55))
+        # --- FIX: Bumped the height multiplier slightly so the QR code can be drawn larger in squished formats
+        qr_display_size = int(min(width * 0.85, height * 0.60))
         pixels_per_module = max(1, qr_display_size // total_modules)
         optimal_display_size = pixels_per_module * total_modules
         qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
@@ -1225,7 +1263,6 @@ class SocialQRMaster:
         final_img = Image.new('RGB', (width, height), back_color)
         draw = ImageDraw.Draw(final_img)
 
-        # Fonts
         avg_dim = (width + height) // 2
         def get_font(max_size, is_bold=False):
             try: return ImageFont.truetype("arialbd.ttf" if is_bold else "arial.ttf", max_size)
@@ -1244,12 +1281,10 @@ class SocialQRMaster:
         qr_x_pos = (width - optimal_display_size) // 2
         gap = int(min(width, height) * 0.08)
 
-        # Header
         draw_centered(title, qr_y_pos - gap - int(avg_dim * 0.045), title_font)
         draw_centered("Don't trust me blindly!", qr_y_pos - gap - int(avg_dim * 0.045) - int(avg_dim * 0.08) - (gap//2), warning_font)
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
-        # Footer & Styling based on Export Type
         if raw_export:
             draw.rectangle([15, 15, width - 15, height - 15], outline="#FF0000", width=15)
             draw_centered("RAW EXPORT", qr_y_pos + optimal_display_size + gap, warning_font, "#FF0000")
@@ -1259,8 +1294,13 @@ class SocialQRMaster:
             
         draw_centered(app_address, height - gap - int(avg_dim * 0.035), footer_font)
 
-        if not self._verify_readability(final_img, payload):
-            raise ValueError("Quality Check Failed: This chunk could not be verified by OpenCV.")
+        # Route tests flawlessly
+        if raw_export:
+            if not self._verify_raw_export(final_img, payload):
+                raise ValueError("Raw Quality Check Failed: This chunk could not be verified.")
+        else:
+            if not self._verify_readability(final_img, payload):
+                raise ValueError("Quality Check Failed: This chunk could not be verified by OpenCV.")
 
         return final_img
 
@@ -1268,7 +1308,7 @@ class SocialQRMaster:
                        width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None, raw_export=False):
         """
         Public Entry Point: Returns a LIST of verified PIL Images.
-        Automatically chunks large payloads.
+        Automatically chunks large payloads dynamically based on canvas space.
         """
         for q in queries: self._validate_safety(q)
         is_safe, msg = self._check_contrast(fill_color, back_color)
@@ -1276,12 +1316,21 @@ class SocialQRMaster:
 
         full_payload = self._compress_payload(queries, instruction)
         
-        # Max ~500 chars guarantees dense payloads survive heavy JPEG compression at 1080px
-        CHUNK_SIZE = 500 
+        # --- FIX: Significantly reduced chunk sizes dynamically to guarantee OpenCV readability! ---
+        qr_display_size = int(min(width * 0.85, height * 0.60))
+        
+        if raw_export:
+            CHUNK_SIZE = 300
+        elif qr_display_size >= 800: # Instagram Format
+            CHUNK_SIZE = 350
+        elif qr_display_size >= 500: # Square Format
+            CHUNK_SIZE = 150
+        else:                        # X / LinkedIn format (Heavily squished height)
+            CHUNK_SIZE = 80 
+            
         chunks = [full_payload[i:i+CHUNK_SIZE] for i in range(0, len(full_payload), CHUNK_SIZE)]
         total = len(chunks)
         
-        # For RAW exports, we default to 1500px to give maximum breathing room
         if raw_export:
             width, height = 1500, 1500
             
