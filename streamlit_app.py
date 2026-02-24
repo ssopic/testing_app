@@ -1070,6 +1070,7 @@ class MapReduceEngine:
 # ==========================================
 
 
+
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
@@ -1171,16 +1172,18 @@ class SocialQRMaster:
             
             # Helper to test both Single and Multi detection
             def test_decoding(image_array):
-                # Try Multi
+                # Try Multi (Returns 4 values)
                 retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
                 if retval and decoded_info:
                     for info in decoded_info:
                         if info == original_data:
                             return True
-                # Try Single
-                retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
-                if retval and decoded_info == original_data:
+                            
+                # Try Single (Returns 3 values)
+                decoded_text, _, _ = detector.detectAndDecode(image_array)
+                if decoded_text == original_data:
                     return True
+                    
                 return False
 
             # 4. Validate Data Integrity
@@ -1202,6 +1205,7 @@ class SocialQRMaster:
         """Custom verifier for raw exports. Simulates moderate JPEG transfer but skips brutal downscaling."""
         import cv2
         import numpy as np
+        import io
         
         buf = io.BytesIO()
         pil_img.save(buf, format="JPEG", quality=85) 
@@ -1211,10 +1215,14 @@ class SocialQRMaster:
         detector = cv2.QRCodeDetector()
         
         def test_scan(image_array):
+            # Try Multi (Returns 4 values)
             ret, dec, _, _ = detector.detectAndDecodeMulti(image_array)
             if ret and dec and original_data in dec: return True
-            ret, dec, _, _ = detector.detectAndDecode(image_array)
-            if ret and dec == original_data: return True
+            
+            # Try Single (Returns 3 values)
+            decoded_text, _, _ = detector.detectAndDecode(image_array)
+            if decoded_text == original_data: return True
+            
             return False
             
         if test_scan(cv_img): return True
@@ -1854,6 +1862,7 @@ def screen_analysis():
             )
 
 #teh process_imorted_qr can be moved to the helper functions part    
+
 def process_imported_qr(queries, instruction, analyze_now):
     """Helper to run the queries, fetch IDs, and update state."""
     # Note: Assumes get_db_driver() and extract_provenance_from_result() are available in scope
@@ -1919,15 +1928,15 @@ def screen_import_qr():
         
         # Robust decoding function to match the verification gauntlet
         def extract_qr_string(image_array):
-            # Try Multi-detect
+            # Try Multi-detect (Returns 4 values)
             retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
             if retval and decoded_info and any(decoded_info):
                 return [info for info in decoded_info if info][0]
             
-            # Try Single-detect
-            retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
-            if retval and decoded_info:
-                return decoded_info
+            # Try Single-detect (Returns 3 values)
+            decoded_text, _, _ = detector.detectAndDecode(image_array)
+            if decoded_text:
+                return decoded_text
                 
             return None
 
