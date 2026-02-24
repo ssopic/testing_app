@@ -1127,6 +1127,7 @@ class MapReduceEngine:
 # ==========================================
 ### 6. QR code generator and reader  ###
 # ==========================================
+
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
@@ -1254,8 +1255,8 @@ class SocialQRMaster:
         qr_img = qr.make_image(fill_color=fill_color, back_color=back_color).convert('RGB')
         
         total_modules = qr_img.size[0]
-        # --- FIX: Bumped the height multiplier slightly so the QR code can be drawn larger in squished formats
-        qr_display_size = int(min(width * 0.85, height * 0.60))
+        # --- FIX: Reduced the height multiplier from 0.60 to 0.50 to give more breathing room for larger fonts
+        qr_display_size = int(min(width * 0.85, height * 0.50))
         pixels_per_module = max(1, qr_display_size // total_modules)
         optimal_display_size = pixels_per_module * total_modules
         qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
@@ -1264,13 +1265,28 @@ class SocialQRMaster:
         draw = ImageDraw.Draw(final_img)
 
         avg_dim = (width + height) // 2
+        
         def get_font(max_size, is_bold=False):
-            try: return ImageFont.truetype("arialbd.ttf" if is_bold else "arial.ttf", max_size)
-            except: return ImageFont.load_default()
+            # Try multiple cross-platform fonts so Linux/Streamlit servers don't fail
+            fonts_to_try = [
+                "arialbd.ttf" if is_bold else "arial.ttf",
+                "Arial Bold.ttf" if is_bold else "Arial.ttf",
+                "DejaVuSans-Bold.ttf" if is_bold else "DejaVuSans.ttf",
+                "LiberationSans-Bold.ttf" if is_bold else "LiberationSans-Regular.ttf"
+            ]
+            for font_name in fonts_to_try:
+                try:
+                    return ImageFont.truetype(font_name, max_size)
+                except IOError:
+                    continue
             
-        title_font = get_font(int(avg_dim * 0.1), False)
-        warning_font = get_font(int(avg_dim * 0.1), True)
-        footer_font = get_font(int(avg_dim * 0.1), False)
+            print("WARNING: No scalable fonts found. Falling back to microscopic default font.")
+            return ImageFont.load_default()
+            
+        # --- FIX: Safely increased the font sizes
+        title_font = get_font(int(avg_dim * 0.06), False)       # Increased from 0.045
+        warning_font = get_font(int(avg_dim * 0.10), True)      # Increased from 0.08
+        footer_font = get_font(int(avg_dim * 0.05), False)      # Increased from 0.035
 
         def draw_centered(text, y, font, fill=None):
             bbox = draw.textbbox((0, 0), text, font=font)
@@ -1281,18 +1297,18 @@ class SocialQRMaster:
         qr_x_pos = (width - optimal_display_size) // 2
         gap = int(min(width, height) * 0.08)
 
-        draw_centered(title, qr_y_pos - gap - int(avg_dim * 0.045), title_font)
-        draw_centered("Don't trust me blindly!", qr_y_pos - gap - int(avg_dim * 0.045) - int(avg_dim * 0.08) - (gap//2), warning_font)
+        draw_centered(title, qr_y_pos - gap - int(avg_dim * 0.06), title_font)
+        draw_centered("Don't trust me blindly!", qr_y_pos - gap - int(avg_dim * 0.06) - int(avg_dim * 0.10) - (gap//2), warning_font)
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
         if raw_export:
             draw.rectangle([15, 15, width - 15, height - 15], outline="#FF0000", width=15)
             draw_centered("RAW EXPORT", qr_y_pos + optimal_display_size + gap, warning_font, "#FF0000")
-            draw_centered("Import directly into the app.", qr_y_pos + optimal_display_size + gap + int(avg_dim*0.1), title_font, "#FF0000")
+            draw_centered("Import directly into the app.", qr_y_pos + optimal_display_size + gap + int(avg_dim*0.12), title_font, "#FF0000")
         else:
             draw_centered("See For Yourself", qr_y_pos + optimal_display_size + gap, warning_font)
             
-        draw_centered(app_address, height - gap - int(avg_dim * 0.035), footer_font)
+        draw_centered(app_address, height - gap - int(avg_dim * 0.05), footer_font)
 
         # Route tests flawlessly
         if raw_export:
@@ -1316,7 +1332,7 @@ class SocialQRMaster:
 
         full_payload = self._compress_payload(queries, instruction)
         
-        # --- FIX: Significantly reduced chunk sizes dynamically to guarantee OpenCV readability! ---
+        # Significantly reduced chunk sizes dynamically to guarantee OpenCV readability!
         qr_display_size = int(min(width * 0.85, height * 0.60))
         
         if raw_export:
@@ -1347,7 +1363,6 @@ class SocialQRMaster:
             generated_images.append(img)
             
         return generated_images
-
                      
 
 # ==========================================
