@@ -3466,8 +3466,3 @@ RELATIONSHIP_DEFINITIONS= {
     "MENTIONED_IN": "In which document is the entity mentioned. CTRL+F"
 }
 
-
-
-if __name__ == "__main__":
-    main()
-    
