@@ -65,6 +65,102 @@ st.set_page_config(page_title="AI Graph Analyst", layout="wide")
 LLM_MODEL = "mistral-medium"
 SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
 
+WELCOME_TEXT="""
+Terms of Use and Legal Disclaimer
+
+Last Updated: February 15, 2026
+
+1. Nature of the Project & Age Restriction
+
+1.1. Portfolio Demonstration Only
+This application ("AI Graph Analyst") is a portfolio project created solely for educational and demonstration purposes. It is designed to showcase technical capabilities in GraphRAG (Retrieval Augmented Generation), AI-driven document analysis, and data visualization. It is NOT a commercial product, a legal investigation tool, or an official source of government information.
+
+1.2. 18+ Age Requirement (Sensitive Content)
+This application processes and visualizes data from the "Epstein Documents" and House Oversight Committee releases. These documents contain explicit descriptions of sexual abuse, crimes involving minors, and other disturbing content.
+
+By accessing this application, you certify that you are at least 18 years of age (or the age of majority in your jurisdiction).
+
+Access by minors is strictly prohibited.
+
+2. Disclaimer of Data Accuracy (The "Public Record" Clause)
+
+The data visualized in this application is derived from publicly available government documents.
+
+No Guarantee of Accuracy: Errors may occur during data cleaning (OCR), ingestion, or processing.
+
+Contextual Limitations: A connection in the graph (e.g., "MENTIONED_IN") does not imply guilt, criminal association, or verified personal relationships. It simply indicates that two terms appear structurally linked in the raw text.
+
+Source Material: Users are strictly advised to verify any findings against the original, official source documents provided by the United States Government. This tool is a secondary visualization aid, not a primary source.
+
+3. AI and Large Language Model (LLM) Warning
+
+This application utilizes Artificial Intelligence (Mistral AI) to interpret text.
+
+Risk of Hallucination: Generative AI can fabricate information. The AI may misinterpret a relationship, invent a citation, or misquote a document.
+
+No Human Review: The outputs are automated and have not been reviewed by human editors.
+
+User Responsibility: You accept that any summary, graph, or answer provided by the AI is a probabilistic generation, not a verified fact.
+
+4. Limitation of Liability
+
+TO THE FULLEST EXTENT PERMITTED BY LAW:
+
+"As Is" Service: The software is provided "AS IS", without warranty of any kind.
+
+No Liability for Damages: The Developer shall not be liable for any direct, indirect, incidental, special, or consequential damages (including reputational harm, loss of data, or legal reliance) arising from the use of this application.
+
+Service Interruptions: We do not guarantee uptime or data persistence.
+
+5. User Conduct & Indemnification
+
+5.1. Prohibited Acts
+You agree NOT to:
+
+Use outputs to harass, defame, or doxx individuals.
+
+Present AI "theories" as verified fact in public forums.
+
+Input prompts that violate the Acceptable Use Policy of our AI provider (Mistral AI), including generating non-consensual sexual content or hate speech.
+
+5.2. Indemnification (The "You Pay if You Break It" Clause)
+You agree to indemnify, defend, and hold harmless the Developer from any claims, liabilities, damages, and expenses (including legal fees) arising from your use of the application, your violation of these Terms, or your violation of any rights of a third party (e.g., posting a defamatory screenshot).
+
+6. Intellectual Property
+
+The underlying code is the intellectual property of the Developer. The underlying data remains in the public domain or subject to original copyright.
+
+7. Privacy and Cookie Policy (EU/GDPR)
+
+7.1. No Direct Data Collection: The Developer does not create accounts or store PII.
+7.2. Hosting (Streamlit/Snowflake): Essential cookies are used by the host for site function.
+7.3. AI Processing: Inputs are sent to Mistral AI for processing. The Developer may review anonymized logs for debugging.
+7.4. Consent: By using the app, you consent to this processing.
+
+8. Modifications
+
+We reserve the right to modify these terms or the application features at any time without notice.
+
+9. Contact & Right to Erasure (GDPR/Accuracy)
+
+We respect individual privacy and data accuracy.
+
+Technical Corrections: If you identify a factual error in the graph structure (e.g., the AI hallucinated a link that does not exist in the source text), please report it. We prioritize fixing technical inaccuracies.
+
+GDPR Rights: EU citizens have the right to request erasure of personal data under specific conditions. While public interest exceptions may apply to government records, we will review all removal requests in compliance with applicable law.
+
+Contact: Please direct requests to the repository owner via [GitHub Issues] at ssopic.
+
+10. Governing Law & Dispute Resolution
+
+10.1. Jurisdiction
+These Terms shall be governed by and construed in accordance with the laws of The Republic of Croatia (or applicable EU law), without regard to its conflict of law provisions.
+
+10.2. Exclusive Venue
+Any legal action or proceeding arising under these Terms shall be brought exclusively in the competent courts located in Croatia. You hereby consent to the jurisdiction of such courts and waive any objection regarding venue (e.g., claiming it is an "inconvenient forum").
+
+By clicking "Get Started," you acknowledge you are 18+ and agree to these Terms.
+"""
 # ==========================================
 ### 2. STATE MANAGEMENT AND UTILITIES ###
 # ==========================================
@@ -3371,102 +3467,7 @@ RELATIONSHIP_DEFINITIONS= {
 }
 
 
-WELCOME_TEXT="""
-Terms of Use and Legal Disclaimer
 
-Last Updated: February 15, 2026
-
-1. Nature of the Project & Age Restriction
-
-1.1. Portfolio Demonstration Only
-This application ("AI Graph Analyst") is a portfolio project created solely for educational and demonstration purposes. It is designed to showcase technical capabilities in GraphRAG (Retrieval Augmented Generation), AI-driven document analysis, and data visualization. It is NOT a commercial product, a legal investigation tool, or an official source of government information.
-
-1.2. 18+ Age Requirement (Sensitive Content)
-This application processes and visualizes data from the "Epstein Documents" and House Oversight Committee releases. These documents contain explicit descriptions of sexual abuse, crimes involving minors, and other disturbing content.
-
-By accessing this application, you certify that you are at least 18 years of age (or the age of majority in your jurisdiction).
-
-Access by minors is strictly prohibited.
-
-2. Disclaimer of Data Accuracy (The "Public Record" Clause)
-
-The data visualized in this application is derived from publicly available government documents.
-
-No Guarantee of Accuracy: Errors may occur during data cleaning (OCR), ingestion, or processing.
-
-Contextual Limitations: A connection in the graph (e.g., "MENTIONED_IN") does not imply guilt, criminal association, or verified personal relationships. It simply indicates that two terms appear structurally linked in the raw text.
-
-Source Material: Users are strictly advised to verify any findings against the original, official source documents provided by the United States Government. This tool is a secondary visualization aid, not a primary source.
-
-3. AI and Large Language Model (LLM) Warning
-
-This application utilizes Artificial Intelligence (Mistral AI) to interpret text.
-
-Risk of Hallucination: Generative AI can fabricate information. The AI may misinterpret a relationship, invent a citation, or misquote a document.
-
-No Human Review: The outputs are automated and have not been reviewed by human editors.
-
-User Responsibility: You accept that any summary, graph, or answer provided by the AI is a probabilistic generation, not a verified fact.
-
-4. Limitation of Liability
-
-TO THE FULLEST EXTENT PERMITTED BY LAW:
-
-"As Is" Service: The software is provided "AS IS", without warranty of any kind.
-
-No Liability for Damages: The Developer shall not be liable for any direct, indirect, incidental, special, or consequential damages (including reputational harm, loss of data, or legal reliance) arising from the use of this application.
-
-Service Interruptions: We do not guarantee uptime or data persistence.
-
-5. User Conduct & Indemnification
-
-5.1. Prohibited Acts
-You agree NOT to:
-
-Use outputs to harass, defame, or doxx individuals.
-
-Present AI "theories" as verified fact in public forums.
-
-Input prompts that violate the Acceptable Use Policy of our AI provider (Mistral AI), including generating non-consensual sexual content or hate speech.
-
-5.2. Indemnification (The "You Pay if You Break It" Clause)
-You agree to indemnify, defend, and hold harmless the Developer from any claims, liabilities, damages, and expenses (including legal fees) arising from your use of the application, your violation of these Terms, or your violation of any rights of a third party (e.g., posting a defamatory screenshot).
-
-6. Intellectual Property
-
-The underlying code is the intellectual property of the Developer. The underlying data remains in the public domain or subject to original copyright.
-
-7. Privacy and Cookie Policy (EU/GDPR)
-
-7.1. No Direct Data Collection: The Developer does not create accounts or store PII.
-7.2. Hosting (Streamlit/Snowflake): Essential cookies are used by the host for site function.
-7.3. AI Processing: Inputs are sent to Mistral AI for processing. The Developer may review anonymized logs for debugging.
-7.4. Consent: By using the app, you consent to this processing.
-
-8. Modifications
-
-We reserve the right to modify these terms or the application features at any time without notice.
-
-9. Contact & Right to Erasure (GDPR/Accuracy)
-
-We respect individual privacy and data accuracy.
-
-Technical Corrections: If you identify a factual error in the graph structure (e.g., the AI hallucinated a link that does not exist in the source text), please report it. We prioritize fixing technical inaccuracies.
-
-GDPR Rights: EU citizens have the right to request erasure of personal data under specific conditions. While public interest exceptions may apply to government records, we will review all removal requests in compliance with applicable law.
-
-Contact: Please direct requests to the repository owner via [GitHub Issues] at ssopic.
-
-10. Governing Law & Dispute Resolution
-
-10.1. Jurisdiction
-These Terms shall be governed by and construed in accordance with the laws of The Republic of Croatia (or applicable EU law), without regard to its conflict of law provisions.
-
-10.2. Exclusive Venue
-Any legal action or proceeding arising under these Terms shall be brought exclusively in the competent courts located in Croatia. You hereby consent to the jurisdiction of such courts and waive any objection regarding venue (e.g., claiming it is an "inconvenient forum").
-
-By clicking "Get Started," you acknowledge you are 18+ and agree to these Terms.
-"""
 if __name__ == "__main__":
     main()
     
