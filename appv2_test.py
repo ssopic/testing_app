@@ -30,6 +30,7 @@ import urllib.parse
 import base64, bz2, io, qrcode, cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageColor
+import zipfile
 
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
@@ -55,7 +56,7 @@ def setup_langsmith():
         os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 
 # ==========================================
-### 1. CONSTANTS ###
+### 1. CONSTANTS and stuff that breaks if I dont put it earlier ###
 # ==========================================
 
 # --- PAGE CONFIGURATION ---
@@ -65,7 +66,65 @@ st.set_page_config(page_title="AI Graph Analyst", layout="wide")
 LLM_MODEL = "mistral-medium"
 SAFETY_REGEX = re.compile(r"(?i)\b(CREATE|DELETE|DETACH|SET|REMOVE|MERGE|DROP|INSERT|ALTER|GRANT|REVOKE)\b")
 
-
+### RELATIONSHIP DEFINITONS ##
+RELATIONSHIP_DEFINITIONS= {
+    "ABILITY": "Refers to the functional capacity or practical feasibility of an entity to perform a specific task. It highlights the availability of space, time, or technical resources required to meet an objective. (Example: Confirming a building has 'plenty of room' for equipment or determining if a person 'can get there' for a scheduled event.)",
+    "ACHIEVEMENT": "Signifies the successful attainment of professional milestones, the receipt of prestigious honors, or significant breakthroughs in a field. (Example: Receiving a humanitarian award or reaching a major financial benchmark like €1 billion in assets under management.)",
+    "ACTION": "Captures the execution of logistical tasks, formal procedures, or specific physical movements intended to achieve a result. (Example: Signing a legal release form or arranging for a private aircraft to transport a colleague.)",
+    "AFFILIATION": "Denotes an entity's formal associations, institutional ties, or professional status. It identifies organizational memberships and social connections that establish a person's role or identity. (Example: Holding a professorship at a university or being a partner in a specific investment group.)",
+    "ANALYSIS": "Describes the systematic evaluation, interpretation, or comparative critique of information and concepts. It involves breaking down complex topics to provide judgment or insight. (Example: Contrasting the political strategies of different candidates or evaluating the impact of economic trends.)",
+    "ASSISTANCE": "Refers to the provision of resources, advocacy, or logistical aid to support another entity's goals or resolve their challenges. This includes financial backing, professional endorsements, and personal guidance. (Example: Providing 'wonderful support' to a cultural project like Poetry in America or using political influence to help an associate secure a government appointment.)",
+    "ATTENTION_DRAWING": "Involves directing focus toward a specific subject, variable, or event to highlight its importance or potential impact. It often appears in the context of investigations or financial warnings where certain details are singled out for closer scrutiny. (Example: Focusing on an investigation into Saudi royal finances or highlighting the negative return characteristics of a specific investment.)",
+    "AUDITION/CASTING": "Relates to the selection and assignment of individuals to specific roles in professional or creative productions. This includes career-defining casting decisions and strategic 'casting' used to facilitate the production of a work. (Example: Being cast in a first movie role or casting a specific person in a play to ensure it gets produced.)",
+    "CAUSALITY": "Describes a systemic relationship where one event or policy change triggers a shift in behavior or strategy across a group. It focuses on the 'ripple effect' of broad actions. (Example: How government budget cuts caused scientists to turn to private donors for funding.)",
+    "CAUSATION": "Refers to a direct link between an event and an immediate, often personal or punitive, consequence for an individual. It highlights a clear 'action-result' pair in a specific case. (Example: A person's 'unhappy situation' being the direct result of legal or disciplinary proceedings.)",
+    "CHALLENGE": "Represents the experience of significant difficulty, formal opposition, or public scrutiny. It often involves legal conflict, ethical reprimands, or being 'in the sights' of an investigator. (Example: Facing a federal judge's 'harsh rebuke' for failing to disclose information or navigating a 'professional misconduct' investigation.)",
+    "CHANGE": "Denotes a transition, modification, or reversal in a particular state or perception. This includes the replacement of information, shifts in public reputation, or the withdrawal of a candidate from a process. (Example: Successfully replacing a 'mug shot' on Wikipedia with a different photo or a official withdrawing from a high-profile job race.)",
+    "COMMUNICATION": "Encompasses the general exchange of information, inquiries, and the mention of entities within media or correspondence. It covers status updates, networking introductions, and instances where a subject is simply 'addressed' or 'named.' (Example: An email asking to 'call when you get a chance' or a news article that 'mentions' a person's name in relation to a professional topic.)",
+    "CONFLICT": "Describes a state of active disagreement, opposition, or a clash between different interests and viewpoints. It often manifests as public policy debates, legal resistance, or the rejection of specific plans. (Example: Opposing a city council's moratorium on development or being involved in a 'raging' debate between critics and supporters of a new law.)",
+    "CREATION": "Describes the process of originating, developing, or producing something new. This includes creative works, business ventures, conceptual frameworks, and physical structures. (Example: Producing a television series like 'Poetry in America,' launching a new publication like 'Cavalier' magazine, or establishing a foundation.)",
+    "DEVELOPMENT": "Refers to the iterative process of advancing, building, or refining projects, technologies, or products. It emphasizes growth and technical improvement rather than just the initial act of creation. (Example: Spending years 'translating a discovery' into a new medical drug, building a software database, or expanding a business's technology suite.)",
+    "DOCUMENT_INTERACTION": "Refers to the creation, handling, or referencing of formal records and published media. This includes writing reports, citing sources, filing legal paperwork, or being the subject of a news article. (Example: Filing a 'HIPAA release,' being 'featured' in a major newspaper, or citations in a formal report.)",
+    "EDUCATION": "Describes the formal process of teaching, academic training, and the pursuit of knowledge within institutional settings. It covers being a student or professor, taking specific courses, and the attainment (or abandonment) of degrees. (Example: Teaching a class to 'Japanese Engineers,' studying at a university like Northwestern, or obtaining a Master's degree from Harvard.)",
+    "EMOTION": "Captures the expression of internal feelings, subjective reactions, and interpersonal sentiments. It tracks the psychological or emotional state of an entity in response to events, people, or information. (Example: Feeling 'devastated' by an association, being 'excited' to start a project, or expressing 'obsession' with a particular subject.)",
+    "EVALUATION": "Relates to the act of assessing or assigning a qualitative or quantitative value to an entity. It focuses on the final 'rating' or 'ranking' given by an authority or expert. (Example: Reporting on how municipal bonds were 'rated' by Moody’s or determining that a country ranks 'at the bottom' for growth outlook.)",
+    "EVENT_PARTICIPATION": "Denotes an entity's presence at or active involvement in organized gatherings, social functions, or public performances. This covers attending professional conferences, participating in artistic rehearsals, or being present at social events. (Example: Performing in a community theater production, attending the World Economic Forum in Davos, or participating in a specific summit.)",
+    "FINANCIAL_TRANSACTION": "Relates to the movement, exchange, or management of monetary resources and assets. It covers a wide range of fiscal activities, including investments, the purchase of goods or services, charitable donations, and the handling of budgets. (Example: Recommending 'bank stocks' to buy, handling a '$25K donation' that bounced, or managing the 'budget and timing of funding' for a production.)",
+    "GAMBLING": "Refers to the act of placing stakes or taking financial risks based on the predicted outcome of a future event, such as an election or a market pivot. It frames speculation as a 'win/loss' scenario rather than traditional long-term investment. (Example: An absolute majority 'betting on HRC to win' the election or making market trades based on high-risk political 'scenarios.')",
+    "GIFT": "Identifies the voluntary transfer of assets, property, or services to another party without receiving payment in return. This includes charitable contributions, the gifting of high-value real estate, and offers of professional time. (Example: Giving a '$50 million townhouse' to a friend or offering several hours of professional expertise as a 'birthday present.')",
+    "GROWTH": "Describes the scaling up or progression of a project or entity into a more substantial stage of existence. It highlights increasing complexity, the addition of new members, or the move from a planning phase to full execution. (Example: Moving from 'preproduction' to 'production' or expanding a project to include new contributors.)",
+    "GUIDANCE": "Involves the sharing of information, news, or legal updates intended to provide advice or direction to a person or group. It focuses on helping others navigate changes in social or political landscapes. (Example: Forwarding a news article about new marriage benefits to help inform 'the gay community.')",
+    "INFLUENCE": "Refers to the exertive force an entity has on the thoughts, behaviors, or decision-making of another. This includes applying professional pressure, providing strategic coaching, or leveraging reputation to sway an outcome. (Example: Receiving 'pressure' from senior supporters to take a leave of absence or coaching an associate on how to refute specific public charges.)",
+    "KNOWLEDGE/OPINION": "Denotes an entity's subjective beliefs, stances, or conceptual framing of external reality. It involves making predictions, assigning qualitative traits to individuals, and asserting logical parallels between events. (Example: Predicting that a resignation will be a 'game changer' or asserting that a specific political figure is a 'heavyweight.')",
+    "LEGAL_ACTION": "Encompasses the formal processes and adversarial interactions associated with the justice system. This includes allegations of crimes, the filing of lawsuits, the execution of search warrants, and the representation of clients by attorneys. (Example: Being 'charged with a sex crime,' filing a civil suit for 'malicious prosecution,' or authorizing a 'search warrant.')",
+    "LEGAL_REPRESENTATION": "Refers to the formal professional relationship where an attorney or legal expert acts on behalf of a client. This involves providing defense, handling negotiations, and serving as a legal spokesperson. (Example: Ken Starr and Alan Dershowitz being the 'lawyers for' a client during proceedings or David Boies representing specific accusers.)",
+    "MEDIA_BROADCAST": "Refers to the act of airing, broadcasting, or featuring content in high-reach media outlets like television, radio, and major press organizations. It covers the filming of interviews, the dissemination of news shows, and the public release of documentaries or televised series. (Example: Airing a primary debate on Fox News, being the subject of a BBC 'Today' programme interview, or being 'featured' in a major television series.)",
+    "MEDICAL": "Relates to biological health, pharmaceuticals, and the study or treatment of physical conditions. This includes clinical trials, the pathology of diseases (such as parasites or viruses), and the regulatory approval of medical drugs. (Example: Conducting a 'clinical trial program' for cholesterol medication or analyzing the effect of 'parasite load' on biological development.)",
+    "MONITORING": "Refers to the persistent observation, surveillance, or systematic tracking of entities, behaviors, and communications. This includes following news cycles, tracking digital presence, or using intelligence to keep 'eyes on' a specific situation or individual. (Example: Watching 'phone lines,' tracking the progress of a 60-day clock on a deal, or monitoring the digital reputation of an individual.)",
+    "MOVEMENT": "Refers to the physical relocation of entities, the logistics of travel, and the specific geographic positioning of people or objects. It tracks departures, arrivals, visits, and the methods of transportation used to facilitate movement between locations. (Example: Flying from 'DC to Brussels,' being 'on the way to the airport,' or returning to a specific residence.)",
+    "NEED": "Describes a requirement, necessity, or strategic imperative that must be fulfilled. It identifies logistical needs, professional mandates, or procedural demands that an entity must address to achieve a goal. (Example: Stating that a person 'needs squashed' for political reasons, 'requiring' a signature on a legal document, or needing 'marching orders' to proceed.)",
+    "OTHER": "Serves as a miscellaneous category for interactions, relationships, and actions that do not fit into specific professional or legal labels. It covers incidental associations, general inclusion, broad impacts, and unclassified physical or conceptual links. (Example: Being 'included' in a general list, 'causing damage' to a property, or 'filming with' a colleague outside of a formal event.)",
+    "OWNERSHIP": "Refers to the possession, control, or legal title an entity has over assets, property, information, or objects. This includes real estate, financial asset classes, personal belongings, and the possession of sensitive media or data. (Example: Owning a 'palatial home,' having 'video recordings' in one's possession, or the state of 'where she keeps her' specific items.)",
+    "PARTICIPATION": "Describes an entity's engagement, role, or active involvement in a broad project, social movement, or ongoing situation. It captures the state of being 'part of' a process or having a stake in a complex unfolding event. (Example: Having a 'peripheral' role in a scandal, 'volunteering' for an international program, or becoming 'involved with' a large-scale real estate development.)",
+    "PHYSICAL_ACTION": "Refers to concrete physical events, natural processes, or forceful physical interactions that occur in the material world. It covers natural phenomena, physical violence, and the forced physical removal or protection of entities. (Example: An ice sheet 'melting' into the ocean, an associate who 'stabbed' a government official, or being 'booted off' a team.)",
+    "PLANNING": "Refers to the formulation of future intentions, strategies, schedules, and logistical arrangements. It covers high-level strategic maneuvering, professional scheduling, and the consideration of alternatives or contingency plans. (Example: Discussing a 'plot' to have a candidate lose an election, 'scheduling' a meeting for a specific time, or 'planning' a visit to a country.)",
+    "POLITICS": "Relates to the exercise of power, institutional governance, and the electoral process. It encompasses campaigning for office, the mechanics of voting and vetoes, party leadership dynamics, and geopolitical maneuvering between states. (Example: Being 'elected' to office, 'campaigning for' a candidate, or 'awaiting a return to power' in a specific country.)",
+    "PREPARATION": "Relates to the state of readiness or the immediate logistical coordination required to execute a plan. It captures the 'readying' phase where entities confirm platforms, time zones, or availability to ensure an upcoming interaction can proceed. (Example: Declaring one is 'ready when you are' for a series or checking for the best platform to use for a scheduled call.)",
+    "PROFESSIONAL_RELATIONSHIP": "Refers to formal connections and collaborative structures within a business or organizational context. It encompasses employment, management hierarchy, contractual partnerships, and professional hiring. (Example: Being 'managed by' a project lead, 'partnering with' another firm for a drug launch, or 'employing' a specific individual for research.)",
+    "PROTECTION": "Refers to actions taken to safeguard an entity, asset, or reputation from harm, interference, or unauthorized access. This includes digital security measures, physical safety in high-risk environments, and the prevention of negative outcomes or professional sabotage. (Example: Securing domains to prevent 'hijacks,' using incognito mode to protect search integrity, or mastering the 'danger' of a high-crime area.)",
+    "RELATED_TO": "Describes a broad, contextual, or logical association between entities. It encompasses social ties, topical relevance, and general connectivity that indicates one entity is relevant to another without a specific procedural or professional role. (Example: Having a 'friendship with' a person, being 'at the center of' a news cycle, or being 'tied up in' a specific investigation.)",
+    "REQUIREMENT": "Relates to an essential condition, prerequisite, or unavoidable obligation that must be met for an entity to function or a process to move forward. It covers functional dependencies, regulatory mandates, and critical needs like funding. (Example: Institutional needs that 'required' a reduction in spending or an individual who 'really needed' money for basic survival.)",
+    "RESEARCH": "Refers to the systematic examination, inquiry, or probing into individuals, entities, or events—often with the intent to uncover hidden, obscured, or previously unknown information. This includes formal investigations and the pursuit of evidence related to legal, financial, or reputational matters. The language used is active and purposeful, emphasizing discovery and the pursuit of facts, frequently in the context of legal or media-driven inquiries. (Example: Launched an investigation of offshore accounts.)",
+    "SELECTION": "Refers to the deliberate act of choosing, nominating, or identifying specific individuals, options, or assets from a broader set, often for a particular role, opportunity, or distinction. This includes the process of being selected for awards, appointments, or inclusion in exclusive lists, as well as the strategic choice of investments, candidates, or partners. The language used is decisive and outcome-oriented, emphasizing the act of picking, nominating, or being chosen for a defined purpose.",
+    "SHARED_CONTENT": "Refers to the act of distributing, forwarding, or making available information, media, or documents to one or more recipients. This includes sharing articles, links, images, legal documents, or other digital content—often to inform, persuade, or prompt discussion. The language and context suggest a focus on the dissemination of news, analysis, or evidence, frequently in real-time or as part of ongoing dialogue.",
+    "SOCIAL_INTERACTION": "Refers to the informal, interpersonal exchanges and relational dynamics between individuals, often characterized by casual conversation, humor, personal updates, and emotional support. This includes discussions about social plans, personal experiences, travel, professional gossip, and the sharing of opinions or advice. The language is typically conversational, sometimes playful or empathetic, and reflects the nuances of personal relationships, social bonding, and the navigation of both public and private spheres. (Example: 'Ask him about a sandwich,' 'I envy you,' 'Don’t let them get you to be emotional. Breathe! Think judicial demeanor.')",
+    "STATE_OF_BEING": "Refers to the condition, status, or existence of a person, entity, organization, or situation at a given time. This includes descriptions of legal, financial, or reputational states, as well as assessments of stability, vulnerability, or transformation. The language often reflects evaluations of risk, certainty, or inevitability, and may involve discussions of ongoing investigations, legal exposure, organizational health, or personal circumstances.",
+    "SUPPLY": "Refers to the provision, delivery, or facilitation of goods, services, information, or access—often in response to a specific request or need. This includes the arrangement of physical items (such as tickets, books, or technology), the sharing of specialized knowledge or resources, and the coordination of logistical support. The language used is transactional and solution-oriented, emphasizing the ability to source, deliver, or enable access to desired assets or opportunities.",
+    "SUPPORT": "Refers to the provision of assistance, encouragement, or backing—whether emotional, strategic, logistical, or professional—to an individual or group. This includes offering advice, sharing resources, advocating for someone’s position, or helping to navigate complex personal, political, or professional challenges. The language used is often empathetic, directive, or collaborative, reflecting a commitment to the recipient’s well-being, success, or resilience.",
+    "TIMING": "Refers to the scheduling, coordination, or sequencing of events, meetings, or actions—often with strategic, logistical, or symbolic significance. This includes the arrangement of appointments, the alignment of activities with external events (such as anniversaries, deadlines, or political transitions), and the consideration of timing as a tactical element in negotiations, public relations, or personal interactions. The language used highlights urgency, opportunity, or the importance of synchronization.",
+    "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities.",
+    "MENTIONED_IN": "In which document is the entity mentioned. CTRL+F"
+}
 # ==========================================
 ### 2. STATE MANAGEMENT AND UTILITIES ###
 # ==========================================
@@ -1073,310 +1132,243 @@ class MapReduceEngine:
 class SocialQRMaster:
     """
     The complete engine for generating Secure, Social-Media-Ready,
-    and Verified QR Codes for Neo4j AuraDB.
+    and Verified QR Codes in chunked batches.
     """
 
     def __init__(self):
-        # 1. Security Filter (Read-Only)
         self.unsafe_pattern = re.compile(
             r'\b(CREATE|DELETE|SET|MERGE|REMOVE|DETACH|DROP|LOAD CSV|CALL)\b',
             re.IGNORECASE
         )
 
-    # --- SECTION A: SECURITY & COMPRESSION ---
-
     def _validate_safety(self, query):
-        """Ensure query is Read-Only."""
         if self.unsafe_pattern.search(query):
             raise ValueError(f"SECURITY BLOCK: Write operation detected in query: {query[:30]}...")
         return True
 
     def _compress_payload(self, queries, instruction=None):
-        """
-        Structure: Instruction + "||SEP||" + Queries
-        Minify -> Join -> Bz2 -> Base64
-        """
         cleaned_queries = [q.strip() for q in queries]
         queries_joined = "|||".join(cleaned_queries)
         text_part = instruction.strip() if instruction else ""
-
         full_payload = f"{text_part}||SEP||{queries_joined}"
         compressed = bz2.compress(full_payload.encode('utf-8'), compresslevel=9)
         return base64.b64encode(compressed).decode('utf-8')
 
     @staticmethod
     def extract_payload(encoded_payload):
-        """Static Helper: Decodes the QR payload back into (instruction, queries)."""
         try:
             compressed = base64.b64decode(encoded_payload)
             full_string = bz2.decompress(compressed).decode('utf-8')
             parts = full_string.split("||SEP||", 1)
-
             if len(parts) != 2:
                 return None, full_string.split("|||")
-
             desc_text, queries_str = parts
-            instruction = desc_text if desc_text else None
-            queries = queries_str.split("|||")
-            return instruction, queries
+            return desc_text if desc_text else None, queries_str.split("|||")
         except Exception:
             return None, []
 
-    # --- SECTION B: COLOR SAFETY ---
-
     def _check_contrast(self, fill_hex, back_hex):
-        """Calculates luminance to ensure scanner readability."""
         def get_lum(hex_code):
             rgb = ImageColor.getrgb(hex_code)
             return (0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]) / 255.0
-
-        lum_fill = get_lum(fill_hex)
-        lum_back = get_lum(back_hex)
-
-        if lum_fill > lum_back:
+        if get_lum(fill_hex) > get_lum(back_hex):
             return False, "INVERTED: Dots must be darker than background."
-        if (lum_back - lum_fill) < 0.4:
+        if (get_lum(back_hex) - get_lum(fill_hex)) < 0.4:
             return False, "LOW CONTRAST: Colors are too similar."
         return True, "OK"
 
-    # --- SECTION C: RAM-OPTIMIZED VERIFICATION ---
-
     def _verify_readability(self, pil_img, original_data):
-        """Simulates social media destruction and attempts to read the code."""
         import cv2
         import numpy as np
-
+        
         def run_test(img_to_test):
-            # 1. RAM Optimization: Scale down to Universal Worst-Case Size (1500px short side)
             target_short_side = 1500
             w, h = img_to_test.size
-
             if min(w, h) > target_short_side:
                 ratio = target_short_side / min(w, h)
-                new_size = (int(w * ratio), int(h * ratio))
-                small_img = img_to_test.resize(new_size, Image.Resampling.LANCZOS)
+                small_img = img_to_test.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
             else:
                 small_img = img_to_test
 
-            # 2. Simulate JPEG Artifacts (Quality 70 + Chroma Subsampling 4:2:0)
             buffer = io.BytesIO()
             small_img.save(buffer, format="JPEG", quality=70, subsampling=2)
             buffer.seek(0)
-
-            # 3. Decode with OpenCV
-            file_bytes = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
-            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
+            cv_img = cv2.imdecode(np.asarray(bytearray(buffer.read()), dtype=np.uint8), cv2.IMREAD_COLOR)
             detector = cv2.QRCodeDetector()
             
-            # Helper to test both Single and Multi detection
-            def test_decoding(image_array):
-                # Try Multi
-                retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
-                if retval and decoded_info:
-                    for info in decoded_info:
-                        if info == original_data:
-                            return True
-                # Try Single
-                retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
-                if retval and decoded_info == original_data:
-                    return True
+            def test_scan(image_array):
+                ret, dec, _, _ = detector.detectAndDecodeMulti(image_array)
+                if ret and dec and original_data in dec: return True
+                dec_text, _, _ = detector.detectAndDecode(image_array)
+                if dec_text == original_data: return True
                 return False
 
-            # 4. Validate Data Integrity
-            if test_decoding(cv_img): return True
-                        
-            # 5. OpenCV is brittle with text/compression. Try a grayscale threshold fallback.
+            if test_scan(cv_img): return True
             gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            if test_decoding(gray): return True
-            
+            if test_scan(gray): return True
             _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
-            if test_decoding(thresh): return True
-            
+            if test_scan(thresh): return True
             return False
-
-        # Strictly test the composite image to guarantee real-world app compatibility
+            
         return run_test(pil_img)
 
-    # --- MAIN GENERATOR ---
+    def _verify_raw_export(self, pil_img, original_data):
+        """Custom verifier for raw exports. Simulates moderate JPEG transfer but skips brutal downscaling."""
+        import cv2
+        import numpy as np
+        import io
+        
+        target_short_side = 1500
+        w, h = pil_img.size
+        if min(w, h) > target_short_side:
+            ratio = target_short_side / min(w, h)
+            new_size = (int(w * ratio), int(h * ratio))
+            small_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+        else:
+            small_img = pil_img
+        
+        buf = io.BytesIO()
+        small_img.save(buf, format="JPEG", quality=85) 
+        file_bytes = np.asarray(bytearray(buf.getvalue()), dtype=np.uint8)
+        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
+        detector = cv2.QRCodeDetector()
+        
+        def test_scan(image_array):
+            ret, dec, _, _ = detector.detectAndDecodeMulti(image_array)
+            if ret and dec and original_data in dec: return True
+            decoded_text, _, _ = detector.detectAndDecode(image_array)
+            if decoded_text == original_data: return True
+            return False
+            
+        if test_scan(cv_img): return True
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        if test_scan(gray): return True
+        _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+        if test_scan(thresh): return True
+        return False
 
-    def generate(self, queries, title, instruction=None, fill_color="black", back_color="white",
-                 width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None):
-        """Main entry point. Returns PIL Image or raises ValueError."""
-
-        if len(title) > 30:
-            title = title[:27] + "..."
-
-        for q in queries:
-            self._validate_safety(q)
-
-        is_safe, msg = self._check_contrast(fill_color, back_color)
-        if not is_safe:
-            raise ValueError(f"Color Error: {msg}")
-
-        # Compress Payload
-        payload = self._compress_payload(queries, instruction)
-
-        # ADAPTIVE ERROR CORRECTION:
-        # Step down from 30% redundancy (H) to 25% (Q) for larger payloads.
-        ec_level = qrcode.constants.ERROR_CORRECT_H
-        if len(payload) > 550:
-            ec_level = qrcode.constants.ERROR_CORRECT_Q
-            print("INFO: Large payload detected. Utilizing Adaptive Density (EC Level Q).")
-
-        qr = qrcode.QRCode(
-            error_correction=ec_level,
-            box_size=1, # <--- FIX: Start at exactly 1 pixel per module
-            border=4,
-        )
+    def _generate_single_image(self, payload, title, fill_color, back_color, width, height, app_address, logo_path, raw_export):
+        """Internal worker that draws and tests a single QR code image."""
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_Q, box_size=1, border=4)
         qr.add_data(payload)
         qr.make(fit=True)
-
         qr_img = qr.make_image(fill_color=fill_color, back_color=back_color).convert('RGB')
+        
+        total_modules = qr_img.size[0]
+        # --- FIX: Reduced the height multiplier from 0.60 to 0.50 to give more breathing room for larger fonts
+        qr_display_size = int(min(width * 0.85, height * 0.50))
+        pixels_per_module = max(1, qr_display_size // total_modules)
+        optimal_display_size = pixels_per_module * total_modules
+        qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
+
         final_img = Image.new('RGB', (width, height), back_color)
         draw = ImageDraw.Draw(final_img)
 
-        # --- DYNAMIC LAYOUT ---
-        # Fonts need to scale based off of both the width and height as we have difering oens for each social media
         avg_dim = (width + height) // 2
-
-        # Defnes the sizes of the font compared to the average dimension
-        target_primary_size = int(avg_dim * 0.08)
-        target_secondary_size = int(avg_dim * 0.045)
-        target_footer_size = int(avg_dim * 0.035)
-
-        def get_fitting_font(text, max_size, max_width, is_bold=False):
-            """Returns the largest font possible that fits within max_width, tracking OS fallbacks."""
-            # Cross-platform font fallback list (Windows, Mac, Linux)
+        
+        def get_font(max_size, is_bold=False):
+            # Try multiple cross-platform fonts so Linux/Streamlit servers don't fail
             fonts_to_try = [
                 "arialbd.ttf" if is_bold else "arial.ttf",
                 "Arial Bold.ttf" if is_bold else "Arial.ttf",
                 "DejaVuSans-Bold.ttf" if is_bold else "DejaVuSans.ttf",
                 "LiberationSans-Bold.ttf" if is_bold else "LiberationSans-Regular.ttf"
             ]
-
-            font = None
-            size = max_size
-            font_path_used = None
-
-            # Find the first scalable font available on the host system
             for font_name in fonts_to_try:
                 try:
-                    font = ImageFont.truetype(font_name, size)
-                    font_path_used = font_name
-                    break
+                    return ImageFont.truetype(font_name, max_size)
                 except IOError:
                     continue
+            
+            print("WARNING: No scalable fonts found. Falling back to microscopic default font.")
+            return ImageFont.load_default()
+            
+        # --- FIX: Safely increased the font sizes
+        title_font = get_font(int(avg_dim * 0.05), False)       # Increased from 0.045
+        warning_font = get_font(int(avg_dim * 0.05), True)      # Increased from 0.08
+        footer_font = get_font(int(avg_dim * 0.05), False)      # Increased from 0.035
 
-            if font is None:
-                print("WARNING: No scalable fonts found on your system. Text will remain tiny.")
-                return ImageFont.load_default(), max_size
-
-            # Shrink font dynamically until it perfectly fits horizontal bounds
-            while size > 12:
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                if text_width <= max_width:
-                    break
-                size -= 2
-                font = ImageFont.truetype(font_path_used, size)
-            return font, size
-
-        # Initialize the fonts here. These depend on the sizes defined above
-        title_font, actual_title_size = get_fitting_font(title, target_secondary_size, width * 0.9, is_bold=False)
-        warning_font, actual_warning_size = get_fitting_font("Don't trust me blindly!", target_primary_size, width * 0.9, is_bold=True)
-        action_font, actual_action_size = get_fitting_font("See For Yourself", target_primary_size, width * 0.9, is_bold=True)
-
-        footer_font, actual_footer_size = get_fitting_font(app_address, target_footer_size, width * 0.6)
-
-        bg_lum = (0.299*ImageColor.getrgb(back_color)[0] + 0.587*ImageColor.getrgb(back_color)[1] + 0.114*ImageColor.getrgb(back_color)[2])
-        text_color = "white" if bg_lum < 128 else "black"
-
-        def draw_centered(text, y, font):
+        def draw_centered(text, y, font, fill=None):
             bbox = draw.textbbox((0, 0), text, font=font)
             w = bbox[2] - bbox[0]
-            draw.text(((width - w) // 2, y), text, fill=text_color, font=font)
+            draw.text(((width - w) // 2, y), text, fill=fill or "black", font=font)
 
-        # ADAPTIVE SIZING: Cap the height slightly so we always have room for the text above and below
-        qr_display_size = int(min(width * 0.85, height * 0.55))
-        
-        # --- FIX: Ensure integer scaling to prevent OpenCV detection failure ---
-        # OpenCV fails if modules are unevenly scaled. We lock the size to an exact multiple.
-        # Since box_size is 1, the image size is exactly the total number of modules!
-        total_modules = qr_img.size[0]
-        pixels_per_module = max(1, qr_display_size // total_modules)
-        optimal_display_size = pixels_per_module * total_modules
-        
-        # Because the source image is 1 pixel per module, NEAREST scaling is mathematically perfect.
-        qr_resized = qr_img.resize((optimal_display_size, optimal_display_size), Image.Resampling.NEAREST)
-
-        # Calculate exactly where the QR code will sit (perfectly centered)
         qr_y_pos = (height - optimal_display_size) // 2
         qr_x_pos = (width - optimal_display_size) // 2
-
-        # Calculate a proportional gap for spacing between the text and the QR code
-        # Increased gap to ensure the layout text does not touch the QR code's quiet zone
         gap = int(min(width, height) * 0.08)
 
-        # --- Draw Header Elements ---
-        # We start just above the QR code and stack upwards to ensure perfect spacing
-        bottom_of_header = qr_y_pos - gap
-
-        # Draw Title right above the QR code
-        title_y = bottom_of_header - actual_title_size
-        draw_centered(title, title_y, title_font)
-        bottom_of_header = title_y - (gap // 2)
-
-        # Draw Warning right above the Title
-        warning_y = bottom_of_header - actual_warning_size
-        draw_centered("Don't trust me blindly!", warning_y, warning_font)
-
-        # Paste QR
+        draw_centered(title, qr_y_pos - gap - int(avg_dim * 0.06), title_font)
+        draw_centered("Don't trust me blindly!", qr_y_pos - gap - int(avg_dim * 0.06) - int(avg_dim * 0.10) - (gap//2), warning_font)
         final_img.paste(qr_resized, (qr_x_pos, qr_y_pos))
 
-        # --- Draw Footer Elements ---
-        footer_text_y = qr_y_pos + optimal_display_size + gap
-        draw_centered("See For Yourself", footer_text_y, action_font)
-
-        # Add the app footer directly below the previous text
-        footer_y = footer_text_y + actual_action_size + gap
-        logo_size = int(actual_footer_size * 1.5)
-        addr_bbox = draw.textbbox((0, 0), app_address, font=footer_font)
-        addr_width = addr_bbox[2] - addr_bbox[0]
-        total_footer_width = logo_size + 15 + addr_width
-        footer_start_x = (width - total_footer_width) // 2
-
-        if logo_path:
-            try:
-                logo = Image.open(logo_path).convert("RGBA")
-                logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-                final_img.paste(logo, (footer_start_x, footer_y), logo)
-            except:
-                draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
+        if raw_export:
+            draw.rectangle([15, 15, width - 15, height - 15], outline="#FF0000", width=15)
+            draw_centered("RAW EXPORT", qr_y_pos + optimal_display_size + gap, warning_font, "#FF0000")
+            draw_centered("Import directly into the app.", qr_y_pos + optimal_display_size + gap + int(avg_dim*0.12), title_font, "#FF0000")
         else:
-            draw.ellipse([footer_start_x, footer_y, footer_start_x+logo_size, footer_y+logo_size], fill=fill_color)
+            draw_centered("See For Yourself", qr_y_pos + optimal_display_size + gap, warning_font)
+            
+        draw_centered(app_address, height - gap - int(avg_dim * 0.05), footer_font)
 
-        draw.text((footer_start_x + logo_size + 15, footer_y + (logo_size - actual_footer_size)//2),
-                  app_address, fill=text_color, font=footer_font)
+        # Route tests flawlessly
+        if raw_export:
+            if not self._verify_raw_export(final_img, payload):
+                raise ValueError("Raw Quality Check Failed: This chunk could not be verified.")
+        else:
+            if not self._verify_readability(final_img, payload):
+                raise ValueError("Quality Check Failed: This chunk could not be verified by OpenCV.")
 
-        # Step 5: THE GAUNTLET (Verification with Smart Error Messaging)
-        if not self._verify_readability(final_img, payload):
-             if len(payload) > 500:
-                 raise ValueError(
-                    f"Quality Check Failed: Too much data ({len(payload)} chars compressed). "
-                    "The QR code dots are too small to survive social media compression. "
-                    "Please reduce the number of queries or shorten your description."
-                 )
-             else:
-                 raise ValueError(
-                    "Quality Check Failed: This color combination is unreadable "
-                    "by standard scanners. Please use higher contrast colors."
-                 )
-
-        print(f"Success: Image generated, secure, and verified. (Payload: {len(payload)} bytes)")
         return final_img
 
+    def generate_batch(self, queries, title, instruction=None, fill_color="black", back_color="white",
+                       width=1080, height=1080, app_address="www.analyzegraph.com", logo_path=None, raw_export=False):
+        """
+        Public Entry Point: Returns a LIST of verified PIL Images.
+        Automatically chunks large payloads dynamically based on canvas space.
+        """
+        # --- NEW: Safe Truncation for custom titles ---
+        # Ensures that "Title 10/10" does not spill off the edges of the canvas
+        if len(title) > 22:
+            title = title[:19] + "..."
+            
+        for q in queries: self._validate_safety(q)
+        is_safe, msg = self._check_contrast(fill_color, back_color)
+        if not is_safe: raise ValueError(f"Color Error: {msg}")
 
+        full_payload = self._compress_payload(queries, instruction)
+        
+        # Significantly reduced chunk sizes dynamically to guarantee OpenCV readability!
+        qr_display_size = int(min(width * 0.85, height * 0.60))
+        
+        if raw_export:
+            CHUNK_SIZE = 300
+        elif qr_display_size >= 800: # Instagram Format
+            CHUNK_SIZE = 350
+        elif qr_display_size >= 500: # Square Format
+            CHUNK_SIZE = 150
+        else:                        # X / LinkedIn format (Heavily squished height)
+            CHUNK_SIZE = 80 
+            
+        chunks = [full_payload[i:i+CHUNK_SIZE] for i in range(0, len(full_payload), CHUNK_SIZE)]
+        total = len(chunks)
+        
+        if raw_export:
+            width, height = 1500, 1500
+            
+        generated_images = []
+        for i, chunk in enumerate(chunks):
+            if total > 1:
+                chunk_payload = f"[CHUNK {i+1}/{total}]{chunk}"
+                page_title = f"{title} {i+1}/{total}"  # --- UPDATED: New n/N format!
+            else:
+                chunk_payload = chunk
+                page_title = title
+                
+            img = self._generate_single_image(chunk_payload, page_title, fill_color, back_color, width, height, app_address, logo_path, raw_export)
+            generated_images.append(img)
+            
+        return generated_images
                      
 
 # ==========================================
@@ -1546,7 +1538,7 @@ def screen_locker():
     st.session_state.app_state["selected_ids"] = current_selection
 
 
-@st.fragment
+
 def get_selected_cypher_queries():
     """Helper to extract cypher queries from the currently selected locker items."""
     if "app_state" not in st.session_state or "evidence_locker" not in st.session_state.app_state:
@@ -1560,6 +1552,11 @@ def get_selected_cypher_queries():
                 queries.append(entry["cypher"])
     return queries
 
+# --- FIX: Clears the old QR codes when you switch formats ---
+def clear_qr_cache():
+    st.session_state.pop("generated_qr_batch", None)
+    st.session_state.pop("generated_qr_size", None)
+
 @st.fragment
 def screen_analysis():
     st.title("Analysis Pane")
@@ -1570,7 +1567,7 @@ def screen_analysis():
         st.warning("No documents selected.")
         return
     
-    # --- NEW: Clear previous analysis if selected documents change ---
+    # Clear previous analysis if selected documents change
     current_ids_sorted = sorted(ids)
     if st.session_state.get("last_analysis_ids") != current_ids_sorted:
         st.session_state.last_analysis = None
@@ -1598,12 +1595,11 @@ def screen_analysis():
     st.divider()
     st.write("### Agentic Analysis")
     
-    # --- NEW: Check for auto-triggered question from QR Import ---
+    # Check for auto-triggered question from QR Import
     auto_q = st.session_state.pop("auto_trigger_question", None)
     
     q = st.chat_input("Ask about this evidence set:")
     
-    # Override 'q' if we have an auto-trigger
     if auto_q:
         q = auto_q
         with st.chat_message("user"): 
@@ -1615,10 +1611,8 @@ def screen_analysis():
             st.error("Mistral API Key is missing.")
             return
 
-        # Initialize Engine
-        engine = MapReduceEngine(api_key=api_key) # Assuming MapReduceEngine is in scope
+        engine = MapReduceEngine(api_key=api_key) 
         
-        # Prepare Docs for the Engine
         docs_payload = []
         for _, row in matched.iterrows():
             docs_payload.append({
@@ -1626,10 +1620,8 @@ def screen_analysis():
                 "Bates_Identity": row.get('Bates_Identity', 'Unknown')
             })
 
-        # --- THE PIPELINE UI ---
         with st.status("Initializing Agent Swarm...", expanded=True) as status:
             
-            # Step A: The Gatekeeper
             strategy = engine.estimate_strategy([d['Body'] for d in docs_payload])
             st.write(f"🧠 Gatekeeper Decision: **{strategy}** Mode")
             
@@ -1645,7 +1637,6 @@ def screen_analysis():
                 status.update(label="Analysis Complete", state="complete", expanded=False)
 
             else:
-                # MAP-REDUCE STRATEGY
                 status.write("🏗️ Architect is analyzing your question...")
                 extraction_goal = engine.architect_query(q)
                 status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
@@ -1662,7 +1653,6 @@ def screen_analysis():
                 final_answer = engine.reduce_facts(facts, q)
                 status.update(label="Analysis Complete", state="complete", expanded=False)
 
-        # --- NEW: Save to session state so it survives button clicks ---
         st.session_state.last_analysis = {
             "q": q,
             "final_answer": final_answer,
@@ -1670,7 +1660,7 @@ def screen_analysis():
             "facts": facts if strategy == "MAP_REDUCE" else []
         }
 
-    # 4. Display Result & QR Generation (Now outside the 'if q:' block)
+    # 4. Display Result & QR Generation
     if st.session_state.get("last_analysis"):
         analysis_data = st.session_state.last_analysis
         st.info(analysis_data["final_answer"])
@@ -1685,84 +1675,97 @@ def screen_analysis():
                             st.text(f"\"{quote}\"")
                         st.divider()
         
-        # --- NEW: QR Generation with Preset Sizes ---
         st.divider()
         st.write("### 🔗 Share Analysis (QR Code)")
         
-        # Define the preset sizes for social media sharing
         qr_presets = {
+            "Raw Data / Full Quality (Archive)": "RAW",
             "Instagram / TikTok Story (1080 x 1920)": (1080, 1920),
             "Square Feed Post (1080 x 1080)": (1080, 1080),
             "X / LinkedIn Post (1200 x 675)": (1200, 675)
         }
         
-        # Dropdown for preset selection
-        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()))
+        # --- FIX: We bind the on_change callback here to clear old images ---
+        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()), on_change=clear_qr_cache)
         
-        if st.button("Generate QR Code", type="primary"):
-            queries = get_selected_cypher_queries()
+        # Add the text input here! Max_chars strictly enforces the UI limit
+        custom_title = st.text_input("QR Code Title:", value="Graph Analysis", max_chars=22, on_change=clear_qr_cache)
+        
+        if st.button("Generate QR Code(s)", type="primary"):
+            clear_qr_cache() 
             
-            # Debugging Output
-            with st.expander("🔍 View Data Payload Details", expanded=False):
-                st.markdown(f"**Instruction:** {analysis_data.get('q', 'None')}")
-                if not queries:
-                    st.write("No queries found.")
-                for idx, qry in enumerate(queries):
-                    st.markdown(f"**Query {idx + 1}**")
-                    st.code(qry, language="cypher")
-                    st.divider()
-                    st.code(analysis_data["q"])
-
+            queries = get_selected_cypher_queries()
             if queries:
                 try:
-                    with st.spinner(f"Generating secure QR code ({selected_preset})..."):
+                    with st.spinner(f"Generating verified QR batch ({selected_preset})..."):
                         qr_master = SocialQRMaster()
-                        width, height = qr_presets[selected_preset]
                         
-                        # Generate the QR with the specific size parameters
-                        qr_img = qr_master.generate(
+                        is_raw = qr_presets[selected_preset] == "RAW"
+                        w, h = (1080, 1080) if is_raw else qr_presets[selected_preset]
+                        
+                        img_list = qr_master.generate_batch(
                             queries=queries, 
-                            title="Graph Analysis", 
+                            title=custom_title,   # <--- Change this to use the new custom_title variable
                             instruction=analysis_data["q"],
-                            width=width,
-                            height=height,
                             fill_color="#000000",
                             back_color="#FFFFFF",
-                            app_address="silvios.ai"
+                            width=w,
+                            height=h,
+                            app_address="silvios.ai",
+                            raw_export=is_raw
                         )
                         
-                        # Save to buffer and convert to bytes
-                        buf = io.BytesIO()
-                        qr_img.save(buf, format="PNG")
-                        img_bytes = buf.getvalue()
-                        
-                        # Store in session state to prevent disappearance on download
-                        st.session_state.generated_qr_bytes = img_bytes
-                        st.session_state.generated_qr_size = f"{width}x{height}"
+                        st.session_state.generated_qr_batch = []
+                        for img in img_list:
+                            buf = io.BytesIO()
+                            img.save(buf, format="PNG")
+                            st.session_state.generated_qr_batch.append(buf.getvalue())
+                            
+                        st.session_state.generated_qr_size = f"{img_list[0].width}x{img_list[0].height}"
                         
                 except Exception as e:
                     st.error(f"Failed to generate QR: {e}")
             else:
                 st.warning("No Cypher queries found in the selected evidence to share.")
                 
-        # Display the generated image and the download button securely from session state
-        if "generated_qr_bytes" in st.session_state:
-            st.success("QR Code generated successfully!")
-            st.image(st.session_state.generated_qr_bytes, caption=f"Scan to import this analysis ({st.session_state.generated_qr_size})")
+        if "generated_qr_batch" in st.session_state:
+            images = st.session_state.generated_qr_batch
+            total_images = len(images)
             
-            # Native Streamlit download button
-            st.download_button(
-                label="⬇️ Download Image",
-                data=st.session_state.generated_qr_bytes,
-                file_name=f"graph_analysis_qr_{st.session_state.generated_qr_size}.png",
-                mime="image/png",
-                use_container_width=True
-            )
-
+            st.success(f"Generated {total_images} QR code(s) successfully!")
+            
+            if total_images > 1:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for i, img_bytes in enumerate(images):
+                        zip_file.writestr(f"graph_analysis_part_{i+1}_of_{total_images}.png", img_bytes)
+                
+                st.download_button(
+                    label="📦 Download Complete Archive (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name="graph_analysis_qrs.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    type="primary"
+                )
+                st.write("Or download images individually below:")
+            
+            cols = st.columns(total_images if total_images <= 4 else 4)
+            for i, img_bytes in enumerate(images):
+                with cols[i % 4]:
+                    st.image(img_bytes, caption=f"Part {i+1} of {total_images}")
+                    st.download_button(
+                        label=f"⬇️ Download Part {i+1}",
+                        data=img_bytes,
+                        file_name=f"graph_analysis_{st.session_state.generated_qr_size}_part{i+1}.png",
+                        mime="image/png",
+                        use_container_width=True,
+                        key=f"dl_btn_{i}"
+                    )
 #teh process_imorted_qr can be moved to the helper functions part    
+
 def process_imported_qr(queries, instruction, analyze_now):
     """Helper to run the queries, fetch IDs, and update state."""
-    # Note: Assumes get_db_driver() and extract_provenance_from_result() are available in scope
     driver = get_db_driver() 
     if not driver:
         st.error("Not connected to database.")
@@ -1783,85 +1786,117 @@ def process_imported_qr(queries, instruction, analyze_now):
         st.warning("Queries ran, but no matching documents were found in the current database.")
         return
 
-    # Create payload for the locker
     payload = {
         "query": f"Imported QR: {instruction or 'Custom Analysis'}",
         "answer": "Imported via QR Code",
         "ids": list(all_found_ids),
-        "cypher": " \nUNION\n ".join(queries) # Combine for display
+        "cypher": " \nUNION\n ".join(queries) 
     }
     
     st.session_state.app_state["evidence_locker"].append(payload)
     
     if analyze_now:
-        # Deselect all, then select only the newly imported IDs
         st.session_state.app_state["selected_ids"] = set(all_found_ids)
-        
-        # Set a flag to trigger the swarm engine automatically in screen_analysis
         if instruction:
             st.session_state.auto_trigger_question = instruction
-        
         st.session_state.current_page = "Analysis"
         st.rerun()
     else:
         st.toast("✅ Saved to Evidence Locker!")
 
+# --- Helper Class to mock Streamlit's UploadedFile for ZIP extraction ---
+class ZipImageWrapper:
+    def __init__(self, data):
+        self.data = data
+    def getvalue(self):
+        return self.data
+
 @st.fragment
 def screen_import_qr():
     st.title("Import Analysis (QR)")
-    st.write("Upload or scan a generated QR code to instantly retrieve the context and run the analysis.")
+    st.write("Upload a QR code (or a batch of QR codes / ZIP file) to instantly retrieve the context and run the analysis.")
     
-    upload = st.file_uploader("Upload QR Code Image", type=["png", "jpg", "jpeg"])
+    # --- FIX: Included 'zip' in supported types ---
+    upload_list = st.file_uploader("Upload QR Code Image(s) or ZIP", type=["png", "jpg", "jpeg", "zip"], accept_multiple_files=True)
     camera = st.camera_input("Or Scan with Camera")
     
-    img_bytes = upload.getvalue() if upload else (camera.getvalue() if camera else None)
+    all_images = []
     
-    if img_bytes:
-        # Decode QR using OpenCV
-        file_bytes = np.asarray(bytearray(img_bytes), dtype=np.uint8)
-        cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        
+    if upload_list:
+        for uploaded_file in upload_list:
+            # --- FIX: Automatically extract and load images if a ZIP is uploaded ---
+            if uploaded_file.name.lower().endswith('.zip'):
+                with zipfile.ZipFile(uploaded_file, "r") as z:
+                    for filename in z.namelist():
+                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                            img_data = z.read(filename)
+                            all_images.append(ZipImageWrapper(img_data))
+            else:
+                all_images.append(uploaded_file)
+                
+    if camera:
+        all_images.append(camera)
+    
+    if all_images:
         detector = cv2.QRCodeDetector()
         
-        # Robust decoding function to match the verification gauntlet
         def extract_qr_string(image_array):
-            # Try Multi-detect
             retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image_array)
             if retval and decoded_info and any(decoded_info):
                 return [info for info in decoded_info if info][0]
-            
-            # Try Single-detect
-            retval, decoded_info, _, _ = detector.detectAndDecode(image_array)
-            if retval and decoded_info:
-                return decoded_info
-                
+            decoded_text, _, _ = detector.detectAndDecode(image_array)
+            if decoded_text: return decoded_text
             return None
 
-        # 1. Try standard color image
-        decoded_str = extract_qr_string(cv_img)
+        chunks = {}
+        total_expected = None
+        single_payload = None
         
-        # 2. Try Grayscale fallback (combats compression artifacts)
-        if not decoded_str:
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            decoded_str = extract_qr_string(gray)
+        for img_input in all_images:
+            file_bytes = np.asarray(bytearray(img_input.getvalue()), dtype=np.uint8)
+            cv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             
-        # 3. Try Binary Threshold fallback (combats bad lighting/low contrast)
-        if not decoded_str:
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
-            decoded_str = extract_qr_string(thresh)
-            
-        if decoded_str:
-            # Assumes SocialQRMaster is in scope
-            instruction, queries = SocialQRMaster.extract_payload(decoded_str)
-            
+            h, w = cv_img.shape[:2]
+            if min(w, h) > 1500:
+                ratio = 1500 / min(w, h)
+                cv_img = cv2.resize(cv_img, (int(w * ratio), int(h * ratio)), interpolation=cv2.INTER_AREA)
+
+            decoded_str = extract_qr_string(cv_img)
+            if not decoded_str:
+                gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+                decoded_str = extract_qr_string(gray)
+            if not decoded_str:
+                _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+                decoded_str = extract_qr_string(thresh)
+                
+            if decoded_str:
+                match = re.match(r"^\[CHUNK (\d+)/(\d+)\](.*)", decoded_str, flags=re.DOTALL)
+                if match:
+                    idx = int(match.group(1))
+                    tot = int(match.group(2))
+                    total_expected = tot
+                    chunks[idx] = match.group(3)
+                else:
+                    single_payload = decoded_str
+
+        final_payload_to_process = None
+        
+        if single_payload:
+            final_payload_to_process = single_payload
+        elif total_expected and len(chunks) == total_expected:
+            final_payload_to_process = "".join([chunks[i] for i in range(1, total_expected + 1)])
+            st.success(f"Successfully assembled {total_expected} QR Code chunks!")
+        elif total_expected:
+            st.info(f"⏳ Collected {len(chunks)} of {total_expected} required QR codes. Please upload the remaining images.")
+
+        if final_payload_to_process:
+            instruction, queries = SocialQRMaster.extract_payload(final_payload_to_process)
             if queries:
-                st.success("✅ QR Code Decoded Successfully!")
+                st.success("✅ Payload Decoded Successfully!")
                 st.markdown(f"**Question/Instruction:** {instruction or 'None'}")
                 with st.expander("View Embedded Cypher Queries"):
                     for q in queries: st.code(q, language="cypher")
                 
-                # User Choice
                 st.divider()
                 st.write("How would you like to proceed?")
                 col1, col2 = st.columns(2)
@@ -1872,9 +1907,11 @@ def screen_import_qr():
                     if st.button("No, Just Save to Locker", use_container_width=True):
                         process_imported_qr(queries, instruction, analyze_now=False)
             else:
-                st.error("QR Code was read, but the payload format is unrecognized. Are you sure this is from Graph Analyst?")
-        else:
-            st.error("No valid QR code found in the image. Please ensure the code is clear, well-lit, and fully visible.")
+                st.error("QR Code was read, but the payload format is unrecognized.")
+        elif not single_payload and not total_expected:
+            st.error("No valid QR codes found in the uploaded images. Make sure you extracted or uploaded the ZIP correctly.")
+
+
 # --- DESKTOP ---
 
 @st.fragment
@@ -3408,62 +3445,3 @@ if __name__ == "__main__":
     main()
             
 
-### RELATIONSHIP DEFINITONS ##
-RELATIONSHIP_DEFINITIONS= {
-    "ABILITY": "Refers to the functional capacity or practical feasibility of an entity to perform a specific task. It highlights the availability of space, time, or technical resources required to meet an objective. (Example: Confirming a building has 'plenty of room' for equipment or determining if a person 'can get there' for a scheduled event.)",
-    "ACHIEVEMENT": "Signifies the successful attainment of professional milestones, the receipt of prestigious honors, or significant breakthroughs in a field. (Example: Receiving a humanitarian award or reaching a major financial benchmark like €1 billion in assets under management.)",
-    "ACTION": "Captures the execution of logistical tasks, formal procedures, or specific physical movements intended to achieve a result. (Example: Signing a legal release form or arranging for a private aircraft to transport a colleague.)",
-    "AFFILIATION": "Denotes an entity's formal associations, institutional ties, or professional status. It identifies organizational memberships and social connections that establish a person's role or identity. (Example: Holding a professorship at a university or being a partner in a specific investment group.)",
-    "ANALYSIS": "Describes the systematic evaluation, interpretation, or comparative critique of information and concepts. It involves breaking down complex topics to provide judgment or insight. (Example: Contrasting the political strategies of different candidates or evaluating the impact of economic trends.)",
-    "ASSISTANCE": "Refers to the provision of resources, advocacy, or logistical aid to support another entity's goals or resolve their challenges. This includes financial backing, professional endorsements, and personal guidance. (Example: Providing 'wonderful support' to a cultural project like Poetry in America or using political influence to help an associate secure a government appointment.)",
-    "ATTENTION_DRAWING": "Involves directing focus toward a specific subject, variable, or event to highlight its importance or potential impact. It often appears in the context of investigations or financial warnings where certain details are singled out for closer scrutiny. (Example: Focusing on an investigation into Saudi royal finances or highlighting the negative return characteristics of a specific investment.)",
-    "AUDITION/CASTING": "Relates to the selection and assignment of individuals to specific roles in professional or creative productions. This includes career-defining casting decisions and strategic 'casting' used to facilitate the production of a work. (Example: Being cast in a first movie role or casting a specific person in a play to ensure it gets produced.)",
-    "CAUSALITY": "Describes a systemic relationship where one event or policy change triggers a shift in behavior or strategy across a group. It focuses on the 'ripple effect' of broad actions. (Example: How government budget cuts caused scientists to turn to private donors for funding.)",
-    "CAUSATION": "Refers to a direct link between an event and an immediate, often personal or punitive, consequence for an individual. It highlights a clear 'action-result' pair in a specific case. (Example: A person's 'unhappy situation' being the direct result of legal or disciplinary proceedings.)",
-    "CHALLENGE": "Represents the experience of significant difficulty, formal opposition, or public scrutiny. It often involves legal conflict, ethical reprimands, or being 'in the sights' of an investigator. (Example: Facing a federal judge's 'harsh rebuke' for failing to disclose information or navigating a 'professional misconduct' investigation.)",
-    "CHANGE": "Denotes a transition, modification, or reversal in a particular state or perception. This includes the replacement of information, shifts in public reputation, or the withdrawal of a candidate from a process. (Example: Successfully replacing a 'mug shot' on Wikipedia with a different photo or a official withdrawing from a high-profile job race.)",
-    "COMMUNICATION": "Encompasses the general exchange of information, inquiries, and the mention of entities within media or correspondence. It covers status updates, networking introductions, and instances where a subject is simply 'addressed' or 'named.' (Example: An email asking to 'call when you get a chance' or a news article that 'mentions' a person's name in relation to a professional topic.)",
-    "CONFLICT": "Describes a state of active disagreement, opposition, or a clash between different interests and viewpoints. It often manifests as public policy debates, legal resistance, or the rejection of specific plans. (Example: Opposing a city council's moratorium on development or being involved in a 'raging' debate between critics and supporters of a new law.)",
-    "CREATION": "Describes the process of originating, developing, or producing something new. This includes creative works, business ventures, conceptual frameworks, and physical structures. (Example: Producing a television series like 'Poetry in America,' launching a new publication like 'Cavalier' magazine, or establishing a foundation.)",
-    "DEVELOPMENT": "Refers to the iterative process of advancing, building, or refining projects, technologies, or products. It emphasizes growth and technical improvement rather than just the initial act of creation. (Example: Spending years 'translating a discovery' into a new medical drug, building a software database, or expanding a business's technology suite.)",
-    "DOCUMENT_INTERACTION": "Refers to the creation, handling, or referencing of formal records and published media. This includes writing reports, citing sources, filing legal paperwork, or being the subject of a news article. (Example: Filing a 'HIPAA release,' being 'featured' in a major newspaper, or citations in a formal report.)",
-    "EDUCATION": "Describes the formal process of teaching, academic training, and the pursuit of knowledge within institutional settings. It covers being a student or professor, taking specific courses, and the attainment (or abandonment) of degrees. (Example: Teaching a class to 'Japanese Engineers,' studying at a university like Northwestern, or obtaining a Master's degree from Harvard.)",
-    "EMOTION": "Captures the expression of internal feelings, subjective reactions, and interpersonal sentiments. It tracks the psychological or emotional state of an entity in response to events, people, or information. (Example: Feeling 'devastated' by an association, being 'excited' to start a project, or expressing 'obsession' with a particular subject.)",
-    "EVALUATION": "Relates to the act of assessing or assigning a qualitative or quantitative value to an entity. It focuses on the final 'rating' or 'ranking' given by an authority or expert. (Example: Reporting on how municipal bonds were 'rated' by Moody’s or determining that a country ranks 'at the bottom' for growth outlook.)",
-    "EVENT_PARTICIPATION": "Denotes an entity's presence at or active involvement in organized gatherings, social functions, or public performances. This covers attending professional conferences, participating in artistic rehearsals, or being present at social events. (Example: Performing in a community theater production, attending the World Economic Forum in Davos, or participating in a specific summit.)",
-    "FINANCIAL_TRANSACTION": "Relates to the movement, exchange, or management of monetary resources and assets. It covers a wide range of fiscal activities, including investments, the purchase of goods or services, charitable donations, and the handling of budgets. (Example: Recommending 'bank stocks' to buy, handling a '$25K donation' that bounced, or managing the 'budget and timing of funding' for a production.)",
-    "GAMBLING": "Refers to the act of placing stakes or taking financial risks based on the predicted outcome of a future event, such as an election or a market pivot. It frames speculation as a 'win/loss' scenario rather than traditional long-term investment. (Example: An absolute majority 'betting on HRC to win' the election or making market trades based on high-risk political 'scenarios.')",
-    "GIFT": "Identifies the voluntary transfer of assets, property, or services to another party without receiving payment in return. This includes charitable contributions, the gifting of high-value real estate, and offers of professional time. (Example: Giving a '$50 million townhouse' to a friend or offering several hours of professional expertise as a 'birthday present.')",
-    "GROWTH": "Describes the scaling up or progression of a project or entity into a more substantial stage of existence. It highlights increasing complexity, the addition of new members, or the move from a planning phase to full execution. (Example: Moving from 'preproduction' to 'production' or expanding a project to include new contributors.)",
-    "GUIDANCE": "Involves the sharing of information, news, or legal updates intended to provide advice or direction to a person or group. It focuses on helping others navigate changes in social or political landscapes. (Example: Forwarding a news article about new marriage benefits to help inform 'the gay community.')",
-    "INFLUENCE": "Refers to the exertive force an entity has on the thoughts, behaviors, or decision-making of another. This includes applying professional pressure, providing strategic coaching, or leveraging reputation to sway an outcome. (Example: Receiving 'pressure' from senior supporters to take a leave of absence or coaching an associate on how to refute specific public charges.)",
-    "KNOWLEDGE/OPINION": "Denotes an entity's subjective beliefs, stances, or conceptual framing of external reality. It involves making predictions, assigning qualitative traits to individuals, and asserting logical parallels between events. (Example: Predicting that a resignation will be a 'game changer' or asserting that a specific political figure is a 'heavyweight.')",
-    "LEGAL_ACTION": "Encompasses the formal processes and adversarial interactions associated with the justice system. This includes allegations of crimes, the filing of lawsuits, the execution of search warrants, and the representation of clients by attorneys. (Example: Being 'charged with a sex crime,' filing a civil suit for 'malicious prosecution,' or authorizing a 'search warrant.')",
-    "LEGAL_REPRESENTATION": "Refers to the formal professional relationship where an attorney or legal expert acts on behalf of a client. This involves providing defense, handling negotiations, and serving as a legal spokesperson. (Example: Ken Starr and Alan Dershowitz being the 'lawyers for' a client during proceedings or David Boies representing specific accusers.)",
-    "MEDIA_BROADCAST": "Refers to the act of airing, broadcasting, or featuring content in high-reach media outlets like television, radio, and major press organizations. It covers the filming of interviews, the dissemination of news shows, and the public release of documentaries or televised series. (Example: Airing a primary debate on Fox News, being the subject of a BBC 'Today' programme interview, or being 'featured' in a major television series.)",
-    "MEDICAL": "Relates to biological health, pharmaceuticals, and the study or treatment of physical conditions. This includes clinical trials, the pathology of diseases (such as parasites or viruses), and the regulatory approval of medical drugs. (Example: Conducting a 'clinical trial program' for cholesterol medication or analyzing the effect of 'parasite load' on biological development.)",
-    "MONITORING": "Refers to the persistent observation, surveillance, or systematic tracking of entities, behaviors, and communications. This includes following news cycles, tracking digital presence, or using intelligence to keep 'eyes on' a specific situation or individual. (Example: Watching 'phone lines,' tracking the progress of a 60-day clock on a deal, or monitoring the digital reputation of an individual.)",
-    "MOVEMENT": "Refers to the physical relocation of entities, the logistics of travel, and the specific geographic positioning of people or objects. It tracks departures, arrivals, visits, and the methods of transportation used to facilitate movement between locations. (Example: Flying from 'DC to Brussels,' being 'on the way to the airport,' or returning to a specific residence.)",
-    "NEED": "Describes a requirement, necessity, or strategic imperative that must be fulfilled. It identifies logistical needs, professional mandates, or procedural demands that an entity must address to achieve a goal. (Example: Stating that a person 'needs squashed' for political reasons, 'requiring' a signature on a legal document, or needing 'marching orders' to proceed.)",
-    "OTHER": "Serves as a miscellaneous category for interactions, relationships, and actions that do not fit into specific professional or legal labels. It covers incidental associations, general inclusion, broad impacts, and unclassified physical or conceptual links. (Example: Being 'included' in a general list, 'causing damage' to a property, or 'filming with' a colleague outside of a formal event.)",
-    "OWNERSHIP": "Refers to the possession, control, or legal title an entity has over assets, property, information, or objects. This includes real estate, financial asset classes, personal belongings, and the possession of sensitive media or data. (Example: Owning a 'palatial home,' having 'video recordings' in one's possession, or the state of 'where she keeps her' specific items.)",
-    "PARTICIPATION": "Describes an entity's engagement, role, or active involvement in a broad project, social movement, or ongoing situation. It captures the state of being 'part of' a process or having a stake in a complex unfolding event. (Example: Having a 'peripheral' role in a scandal, 'volunteering' for an international program, or becoming 'involved with' a large-scale real estate development.)",
-    "PHYSICAL_ACTION": "Refers to concrete physical events, natural processes, or forceful physical interactions that occur in the material world. It covers natural phenomena, physical violence, and the forced physical removal or protection of entities. (Example: An ice sheet 'melting' into the ocean, an associate who 'stabbed' a government official, or being 'booted off' a team.)",
-    "PLANNING": "Refers to the formulation of future intentions, strategies, schedules, and logistical arrangements. It covers high-level strategic maneuvering, professional scheduling, and the consideration of alternatives or contingency plans. (Example: Discussing a 'plot' to have a candidate lose an election, 'scheduling' a meeting for a specific time, or 'planning' a visit to a country.)",
-    "POLITICS": "Relates to the exercise of power, institutional governance, and the electoral process. It encompasses campaigning for office, the mechanics of voting and vetoes, party leadership dynamics, and geopolitical maneuvering between states. (Example: Being 'elected' to office, 'campaigning for' a candidate, or 'awaiting a return to power' in a specific country.)",
-    "PREPARATION": "Relates to the state of readiness or the immediate logistical coordination required to execute a plan. It captures the 'readying' phase where entities confirm platforms, time zones, or availability to ensure an upcoming interaction can proceed. (Example: Declaring one is 'ready when you are' for a series or checking for the best platform to use for a scheduled call.)",
-    "PROFESSIONAL_RELATIONSHIP": "Refers to formal connections and collaborative structures within a business or organizational context. It encompasses employment, management hierarchy, contractual partnerships, and professional hiring. (Example: Being 'managed by' a project lead, 'partnering with' another firm for a drug launch, or 'employing' a specific individual for research.)",
-    "PROTECTION": "Refers to actions taken to safeguard an entity, asset, or reputation from harm, interference, or unauthorized access. This includes digital security measures, physical safety in high-risk environments, and the prevention of negative outcomes or professional sabotage. (Example: Securing domains to prevent 'hijacks,' using incognito mode to protect search integrity, or mastering the 'danger' of a high-crime area.)",
-    "RELATED_TO": "Describes a broad, contextual, or logical association between entities. It encompasses social ties, topical relevance, and general connectivity that indicates one entity is relevant to another without a specific procedural or professional role. (Example: Having a 'friendship with' a person, being 'at the center of' a news cycle, or being 'tied up in' a specific investigation.)",
-    "REQUIREMENT": "Relates to an essential condition, prerequisite, or unavoidable obligation that must be met for an entity to function or a process to move forward. It covers functional dependencies, regulatory mandates, and critical needs like funding. (Example: Institutional needs that 'required' a reduction in spending or an individual who 'really needed' money for basic survival.)",
-    "RESEARCH": "Refers to the systematic examination, inquiry, or probing into individuals, entities, or events—often with the intent to uncover hidden, obscured, or previously unknown information. This includes formal investigations and the pursuit of evidence related to legal, financial, or reputational matters. The language used is active and purposeful, emphasizing discovery and the pursuit of facts, frequently in the context of legal or media-driven inquiries. (Example: Launched an investigation of offshore accounts.)",
-    "SELECTION": "Refers to the deliberate act of choosing, nominating, or identifying specific individuals, options, or assets from a broader set, often for a particular role, opportunity, or distinction. This includes the process of being selected for awards, appointments, or inclusion in exclusive lists, as well as the strategic choice of investments, candidates, or partners. The language used is decisive and outcome-oriented, emphasizing the act of picking, nominating, or being chosen for a defined purpose.",
-    "SHARED_CONTENT": "Refers to the act of distributing, forwarding, or making available information, media, or documents to one or more recipients. This includes sharing articles, links, images, legal documents, or other digital content—often to inform, persuade, or prompt discussion. The language and context suggest a focus on the dissemination of news, analysis, or evidence, frequently in real-time or as part of ongoing dialogue.",
-    "SOCIAL_INTERACTION": "Refers to the informal, interpersonal exchanges and relational dynamics between individuals, often characterized by casual conversation, humor, personal updates, and emotional support. This includes discussions about social plans, personal experiences, travel, professional gossip, and the sharing of opinions or advice. The language is typically conversational, sometimes playful or empathetic, and reflects the nuances of personal relationships, social bonding, and the navigation of both public and private spheres. (Example: 'Ask him about a sandwich,' 'I envy you,' 'Don’t let them get you to be emotional. Breathe! Think judicial demeanor.')",
-    "STATE_OF_BEING": "Refers to the condition, status, or existence of a person, entity, organization, or situation at a given time. This includes descriptions of legal, financial, or reputational states, as well as assessments of stability, vulnerability, or transformation. The language often reflects evaluations of risk, certainty, or inevitability, and may involve discussions of ongoing investigations, legal exposure, organizational health, or personal circumstances.",
-    "SUPPLY": "Refers to the provision, delivery, or facilitation of goods, services, information, or access—often in response to a specific request or need. This includes the arrangement of physical items (such as tickets, books, or technology), the sharing of specialized knowledge or resources, and the coordination of logistical support. The language used is transactional and solution-oriented, emphasizing the ability to source, deliver, or enable access to desired assets or opportunities.",
-    "SUPPORT": "Refers to the provision of assistance, encouragement, or backing—whether emotional, strategic, logistical, or professional—to an individual or group. This includes offering advice, sharing resources, advocating for someone’s position, or helping to navigate complex personal, political, or professional challenges. The language used is often empathetic, directive, or collaborative, reflecting a commitment to the recipient’s well-being, success, or resilience.",
-    "TIMING": "Refers to the scheduling, coordination, or sequencing of events, meetings, or actions—often with strategic, logistical, or symbolic significance. This includes the arrangement of appointments, the alignment of activities with external events (such as anniversaries, deadlines, or political transitions), and the consideration of timing as a tactical element in negotiations, public relations, or personal interactions. The language used highlights urgency, opportunity, or the importance of synchronization.",
-    "USAGE": "Refers to the act of employing, leveraging, or repurposing resources, information, or assets for a specific purpose or goal. This includes the strategic application of media, data, or personal connections to achieve an outcome, as well as the adaptation of content, platforms, or networks for new or expanded uses. The language used is functional and outcome-oriented, emphasizing the practical or tactical deployment of available tools or opportunities.",
-    "MENTIONED_IN": "In which document is the entity mentioned. CTRL+F"
-}
