@@ -1091,6 +1091,8 @@ class MapReduceEngine:
                        f"- They were automatically split into {stats['total_split_chunks']} overlapping parts to ensure no data loss."
             
             status_container.write(msg)
+            # Accurate Swarm Announcement!
+            status_container.write(f"🚀 Spawning {len(batches)} extraction agents to process the batches concurrently...")
         
         all_results = []
         
@@ -1642,7 +1644,6 @@ def screen_analysis():
                 status.write(f"🎯 Goal Set: *{extraction_goal.goal_description}*")
                 
                 status.update(label="Agents are scanning documents...", state="running")
-                status.write(f"🚀 Spawning {len(docs_payload)} extraction agents...")
                 
                 facts = engine.run_parallel_map(docs_payload, extraction_goal, status_container=status)
                 
