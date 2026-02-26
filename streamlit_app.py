@@ -421,9 +421,13 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         raw_path_escaped = html.escape(raw_path)
         
         if raw_path_escaped and not raw_path_escaped.startswith('http'):
-            # Strip the arbitrary root folder (e.g. HOUSE_OVERSIGHT_009/) to give them the clean Dropbox/Drive path
-            clean_path = re.sub(r'^HOUSE_OVERSIGHT_\d+/', '', raw_path_escaped).lstrip('/')
+            # Standardize slashes to forward slashes just in case, then strip the root folder
+            standardized_path = raw_path_escaped.replace('\\', '/')
+            clean_path = re.sub(r'^HOUSE_OVERSIGHT_\d+/', '', standardized_path).lstrip('/')
             filename = clean_path.split('/')[-1] if '/' in clean_path else clean_path
+            
+            # Format path with arrows for better readability
+            arrow_path = clean_path.replace('/', '-->')
             
             link_text = f'<link href="{link_url_escaped}" color="blue"><u>Official House Oversight Committee Repository</u></link>'
             story.append(Paragraph(link_text, styles['Normal']))
@@ -432,7 +436,7 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
             instructions = (
                 f"<i><font size=9 color=dimgrey>To verify this document:</font></i><br/>"
                 f"<i><font size=9 color=dimgrey>1. Click the link above and open the <b>Google Drive</b> or <b>Dropbox</b> backup.</font></i><br/>"
-                f"<i><font size=9 color=dimgrey>2. Navigate using path: <b>{clean_path}</b></font></i><br/>"
+                f"<i><font size=9 color=dimgrey>2. Navigate using path: <b>{arrow_path}</b></font></i><br/>"
             )
             story.append(Paragraph(instructions, styles['Normal']))
             
