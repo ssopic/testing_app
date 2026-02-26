@@ -401,16 +401,32 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         # Bates Code
         story.append(Paragraph(f"<b>Document: {html.escape(doc_data['bates_code'])}</b>", styles['Heading3']))
         
-        # Link to Source Document
-        link_url = html.escape(doc_data.get('link', '#'))
-        raw_path = html.escape(doc_data.get('raw_path', ''))
+        # Link to Source Document processing
+        raw_input_link = str(doc_data.get('link', '#')).strip()
+        raw_path = str(doc_data.get('raw_path', '')).strip()
         
-        if link_url != '#':
-            link_text = f'<link href="{link_url}" color="blue"><u>View Original Source Document (Dropbox)</u></link>'
+        # If the link passed in is a relative file path, transform it to the Dropbox deep link
+        if raw_input_link != '#' and not raw_input_link.startswith('http'):
+            clean_path = raw_input_link.lstrip('/')
+            base_dropbox = "https://www.dropbox.com/scl/fo/9bq6uj0pnycpa4gxqiuzs/ABBA-BoYUAT7627MBeLiVYg"
+            params = "?rlkey=3s6ggcjihou9nt8srsn2qt1n7&st=4aejaath&dl=0"
+            link_url = f"{base_dropbox}/{clean_path}{params}"
+            
+            # Since the user passed a raw path as the link, ensure raw_path matches for the subtitle
+            if not raw_path:
+                raw_path = raw_input_link
+        else:
+            link_url = raw_input_link
+
+        link_url_escaped = html.escape(link_url)
+        raw_path_escaped = html.escape(raw_path)
+        
+        if link_url_escaped != '#':
+            link_text = f'<link href="{link_url_escaped}" color="blue"><u>View Original Source Document (Dropbox)</u></link>'
             story.append(Paragraph(link_text, styles['Normal']))
-            if raw_path:
+            if raw_path_escaped:
                 # Add the raw path below the link so they know what to search for in Google Drive
-                story.append(Paragraph(f"<i><font size=8 color=dimgrey>File Path: {raw_path}</font></i>", styles['Normal']))
+                story.append(Paragraph(f"<i><font size=8 color=dimgrey>File Path: {raw_path_escaped}</font></i>", styles['Normal']))
         else:
             story.append(Paragraph("<i>Source document link unavailable.</i>", styles['Normal']))
             
@@ -468,7 +484,6 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
-
 # ==========================================
 ### 2. DATA ACCESS LAYER ###
 # ==========================================
