@@ -1422,7 +1422,7 @@ def screen_extraction():
         
         if st.button("Run Query"):
             if SAFETY_REGEX.search(cypher_input):
-                st.error("🚨 SECURITY ALERT: destructive commands are not allowed.")
+                st.error("SECURITY ALERT: destructive commands are not allowed.")
             else:
                 creds = st.session_state.app_state["neo4j_creds"]
                 driver = get_cached_driver(creds["uri"], creds["auth"])
@@ -1893,7 +1893,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
     # --- Accessible Hacker Palette ---
     COLOR_ROOT = "#FF8C00"          # Amber (Subject)
-    COLOR_RELATIONSHIP = "#4E545C"  # Gunmetal Gray (Relationship)
+    COLOR_RELATIONSHIP = "#FFFFFF" #"#4E545C"  # Gunmetal Gray (Relationship)
     COLOR_TARGET = "#00ADB5"        # Teal (Object)
     COLOR_BORDER = "#FFFFFF"        # White borders
 
@@ -1901,7 +1901,7 @@ def render_explorer_workspace(selector_type, selected_items):
     
     with c_mid:
         if not selected_items:
-            st.info("👈 Select entities from the left and click 'Show Data'.")
+            st.info("Select entities from the left and click 'Show Data'.")
             return
 
         names = [item['name'] for item in selected_items]
@@ -1918,8 +1918,8 @@ def render_explorer_workspace(selector_type, selected_items):
             # Hierarchy: Name (Amber) -> Edge (Gray) -> Target (Teal)
             legend_items = [
                 (COLOR_ROOT, "Subject", "Layer 1: The Source Entity (Root)", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
-                (COLOR_RELATIONSHIP, "Relationship (⬜)", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
-                (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+                (COLOR_RELATIONSHIP, "Connection (⬜)", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
+                (COLOR_TARGET, "Target Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
             ]
             
         legend_html = '<div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">'
