@@ -1893,7 +1893,7 @@ def render_explorer_workspace(selector_type, selected_items):
 
     # --- Accessible Hacker Palette ---
     COLOR_ROOT = "#FF8C00"          # Amber (Subject)
-    COLOR_RELATIONSHIP = "#FFFFFF" #"#4E545C"  # Gunmetal Gray (Relationship)
+    COLOR_RELATIONSHIP = "#4E545C"  # Gunmetal Gray (Relationship)
     COLOR_TARGET = "#00ADB5"        # Teal (Object)
     COLOR_BORDER = "#FFFFFF"        # White borders
 
