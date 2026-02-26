@@ -2136,7 +2136,7 @@ def render_explorer_workspace(selector_type, selected_items):
             st.caption("Filter by Relationships and Target Types")
 
             raw_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-            edge_options = [f"⬜ {e}" for e in raw_edges]
+            edge_options = [f" {e}" for e in raw_edges]
             
             selected_edges_fmt = st.multiselect(
                 "Filter by Connection Type:",
@@ -2154,7 +2154,7 @@ def render_explorer_workspace(selector_type, selected_items):
                 
             if 'connected_node_label' in filtered_df_step1.columns:
                 raw_targets = sorted(filtered_df_step1['connected_node_label'].unique())
-                target_options = [f"🟦 {t}" for t in raw_targets]
+                target_options = [f" {t}" for t in raw_targets]
 
                 selected_targets_fmt = st.multiselect(
                     "Filter by Target Type:",
