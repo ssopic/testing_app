@@ -1911,15 +1911,15 @@ def render_explorer_workspace(selector_type, selected_items):
             # Hierarchy: Edge (Gray) -> Source (Amber) -> Target (Teal)
             legend_items = [
                 (COLOR_RELATIONSHIP, "Relationship", "Layer 1: The Connection (Root)", "border: 1px solid #666;"),
-                (COLOR_ROOT, "Subject (🟠)", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
-                (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+                (COLOR_ROOT, "Subject", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
+                (COLOR_TARGET, "Object Type", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
             ]
         else:
             # Hierarchy: Name (Amber) -> Edge (Gray) -> Target (Teal)
             legend_items = [
                 (COLOR_ROOT, "Subject", "Layer 1: The Source Entity (Root)", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
-                (COLOR_RELATIONSHIP, "Connection (⬜)", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
-                (COLOR_TARGET, "Target Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+                (COLOR_RELATIONSHIP, "Connection ", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
+                (COLOR_TARGET, "Target Type ", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
             ]
             
         legend_html = '<div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">'
