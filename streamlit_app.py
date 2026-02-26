@@ -39,6 +39,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+import html
 
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
@@ -259,6 +260,46 @@ def get_rel_definition(rel_name):
     """Helper to safely get a definition or a default prompt."""
     return RELATIONSHIP_DEFINITIONS.get(rel_name, "Relationship connection between entities.")
 
+#######################
+# Additional chapter for the document generation
+######################
+def format_md_for_reportlab(text):
+    """
+    Safely converts basic LLM Markdown to ReportLab-compatible HTML.
+    Handles bold, italics, headers, bullets, and line breaks while escaping raw XML characters.
+    """
+    if not text: 
+        return ""
+        
+    # 1. Escape HTML/XML chars to prevent ReportLab crashes (e.g., <, >, &)
+    text = html.escape(text)
+    
+    # 2. Convert literal newlines to ReportLab breaks
+    text = text.replace('\n', '<br/>')
+    
+    # 3. Horizontal rules (---) -> Visual break
+    text = re.sub(r'(?:<br/>\s*)*---+(?:\s*<br/>)*', r'<br/><br/>', text)
+    
+    # 4. Headers (e.g. ### Title) -> Convert the #s to breaks, let bolding handle emphasis
+    text = re.sub(r'(?:<br/>\s*)*#{1,6}\s+', r'<br/><br/>', text)
+    
+    # 5. Bold (**text**)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    
+    # 6. Italics (*text* or _text_)
+    text = re.sub(r'(?<!\w)\*(.*?)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'\b_(.*?)_\b', r'<i>\1</i>', text)
+    
+    # 7. Bullets (Catch - or * at start of line/break)
+    text = re.sub(r'(?:<br/>|^)\s*[-*]\s+', r'<br/>&bull; ', text)
+    
+    # 8. Clean up excess consecutive breaks
+    text = re.sub(r'(<br/>\s*){3,}', '<br/><br/>', text)
+    text = re.sub(r'^(<br/>)+', '', text)
+    text = re.sub(r'(<br/>)+$', '', text)
+    
+    return text
+
 def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts, cypher_queries):
     """
     Generates a PDF analysis report and returns it as a bytes buffer 
@@ -310,7 +351,7 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
     # --- 1. COVER PAGE ---
     story.append(Spacer(1, 1 * inch))
     story.append(Paragraph("AI GRAPH ANALYSIS REPORT", styles['Heading2']))
-    story.append(Paragraph(f"<b>Query:</b> {user_query}", huge_style))
+    story.append(Paragraph(f"<b>Query:</b> {html.escape(user_query)}", huge_style))
     
     # Mandatory LLM Hallucination Disclaimer
     disclaimer_text = (
@@ -341,7 +382,10 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
     # --- 3. CHAPTER 1: EXECUTIVE SUMMARY ---
     story.append(Paragraph("Chapter 1: Executive Summary", styles['Heading1']))
     story.append(Spacer(1, 0.2 * inch))
-    story.append(Paragraph(final_answer, styles['Normal']))
+    
+    # Apply Markdown Formatting to Final Answer
+    formatted_final_answer = format_md_for_reportlab(final_answer)
+    story.append(Paragraph(formatted_final_answer, styles['Normal']))
     story.append(PageBreak())
 
     # --- 4. CHAPTER 2: DETAILED DOCUMENT FINDINGS ---
@@ -355,10 +399,10 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
 
     for doc_data in document_facts:
         # Bates Code
-        story.append(Paragraph(f"<b>Document: {doc_data['bates_code']}</b>", styles['Heading3']))
+        story.append(Paragraph(f"<b>Document: {html.escape(doc_data['bates_code'])}</b>", styles['Heading3']))
         
         # Link to Source Document
-        link_url = doc_data.get('link', '#')
+        link_url = html.escape(doc_data.get('link', '#'))
         link_text = f'<link href="{link_url}" color="blue"><u>View Original Source Document Here</u></link>'
         story.append(Paragraph(link_text, styles['Normal']))
         story.append(Spacer(1, 0.05 * inch))
@@ -369,9 +413,11 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
 
         # Extracted Facts & Quotes
         for fact in doc_data.get('facts', []):
-            story.append(Paragraph(f"<b>Extracted Fact:</b> {fact['summary']}", styles['Normal']))
+            formatted_fact = format_md_for_reportlab(fact['summary'])
+            story.append(Paragraph(f"<b>Extracted Fact:</b> {formatted_fact}", styles['Normal']))
             for quote in fact.get('quotes', []):
-                story.append(Paragraph(f"<i>\"{quote}\"</i>", ParagraphStyle('Quote', parent=styles['Normal'], leftIndent=20, spaceBefore=2)))
+                formatted_quote = format_md_for_reportlab(quote)
+                story.append(Paragraph(f"<i>\"{formatted_quote}\"</i>", ParagraphStyle('Quote', parent=styles['Normal'], leftIndent=20, spaceBefore=2)))
             story.append(Spacer(1, 0.15 * inch))
             
         story.append(Spacer(1, 0.2 * inch))
@@ -384,7 +430,7 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
     
     # Repeat the title/query to ensure no manipulation is hidden
     story.append(Paragraph("<b>Original Analyst Query (Report Title):</b>", styles['Heading3']))
-    story.append(Paragraph(user_query, styles['Normal']))
+    story.append(Paragraph(html.escape(user_query), styles['Normal']))
     story.append(Spacer(1, 0.3 * inch))
     
     # Cypher Queries Used
@@ -394,7 +440,9 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
 
     # Formatting the Cypher queries in a Code Block
     combined_cypher = "<br/><br/>".join(cypher_queries) if cypher_queries else "No specific Cypher queries were captured."
-    code_paragraph = Paragraph(combined_cypher.replace("\n", "<br/>"), code_style)
+    # Make sure to escape Cypher so less-than/greater-than signs (<, >) don't crash ReportLab
+    escaped_cypher = html.escape(combined_cypher).replace("\n", "<br/>")
+    code_paragraph = Paragraph(escaped_cypher, code_style)
 
     data = [[code_paragraph]]
     table = Table(data, colWidths=[6.5 * inch])
