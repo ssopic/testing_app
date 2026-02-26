@@ -32,7 +32,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 import zipfile
 
-
+import asyncio
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
 # It ensures the library picks up the config before the @traceable decorators run.
