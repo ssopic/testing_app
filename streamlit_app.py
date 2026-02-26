@@ -1030,22 +1030,24 @@ class MapReduceEngine:
             status_container.write(f"🚀 Spawning Pass 1 Map Agents (Max 10 concurrent)...")
 
         # Pass 1: Map all chunks concurrently
-        # We process chunk by chunk, tracking which internal_id they belong to
+        # We process chunk by chunk, tracking which internal_id they belong to via an async wrapper
         chunk_tasks = []
-        task_to_doc = {}
+        
+        async def map_with_id(i_id: str, text: str):
+            """Wrapper to safely pass the internal ID along with the coroutine result."""
+            result = await self._amap_chunk(text, goal, sem)
+            return i_id, result
+
         for internal_id, chunks in doc_chunks.items():
             for chunk_text in chunks:
-                task = asyncio.create_task(self._amap_chunk(chunk_text, goal, sem))
-                chunk_tasks.append(task)
-                task_to_doc[task] = internal_id
+                chunk_tasks.append(map_with_id(internal_id, chunk_text))
 
         doc_extracted_facts = {i_id: [] for i_id in id_translation.keys()}
         
         completed = 0
         for coro in asyncio.as_completed(chunk_tasks):
-            facts = await coro
-            internal_id = task_to_doc[coro] # Retrieve closure map
-            doc_extracted_facts[internal_id].extend(facts)
+            i_id, facts = await coro
+            doc_extracted_facts[i_id].extend(facts)
             completed += 1
             if status_container:
                 status_container.update(label=f"Pass 1: Processed {completed}/{total_chunks} chunks...", state="running")
