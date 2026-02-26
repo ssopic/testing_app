@@ -403,8 +403,17 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         
         # Link to Source Document
         link_url = html.escape(doc_data.get('link', '#'))
-        link_text = f'<link href="{link_url}" color="blue"><u>View Original Source Document Here</u></link>'
-        story.append(Paragraph(link_text, styles['Normal']))
+        raw_path = html.escape(doc_data.get('raw_path', ''))
+        
+        if link_url != '#':
+            link_text = f'<link href="{link_url}" color="blue"><u>View Original Source Document (Dropbox)</u></link>'
+            story.append(Paragraph(link_text, styles['Normal']))
+            if raw_path:
+                # Add the raw path below the link so they know what to search for in Google Drive
+                story.append(Paragraph(f"<i><font size=8 color=dimgrey>File Path: {raw_path}</font></i>", styles['Normal']))
+        else:
+            story.append(Paragraph("<i>Source document link unavailable.</i>", styles['Normal']))
+            
         story.append(Spacer(1, 0.05 * inch))
         
         # Compliance Warning if the MapReduce Engine flagged it
