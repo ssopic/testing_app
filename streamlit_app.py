@@ -405,12 +405,11 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         raw_input_link = str(doc_data.get('link', '#')).strip()
         raw_path = str(doc_data.get('raw_path', '')).strip()
         
-        # If the link passed in is a relative file path, transform it to the Dropbox deep link
+        # If the link is a relative path, we route to the root Dropbox folder 
+        # since Dropbox hashes its subdirectories (preventing direct deep-linking).
         if raw_input_link != '#' and not raw_input_link.startswith('http'):
-            clean_path = raw_input_link.lstrip('/')
-            base_dropbox = "https://www.dropbox.com/scl/fo/9bq6uj0pnycpa4gxqiuzs/ABBA-BoYUAT7627MBeLiVYg"
-            params = "?rlkey=3s6ggcjihou9nt8srsn2qt1n7&st=4aejaath&dl=0"
-            link_url = f"{base_dropbox}/{clean_path}{params}"
+            base_dropbox = "https://www.dropbox.com/scl/fo/9bq6uj0pnycpa4gxqiuzs/ABBA-BoYUAT7627MBeLiVYg?rlkey=3s6ggcjihou9nt8srsn2qt1n7&st=4aejaath&dl=0"
+            link_url = base_dropbox
             
             # Since the user passed a raw path as the link, ensure raw_path matches for the subtitle
             if not raw_path:
@@ -422,11 +421,15 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         raw_path_escaped = html.escape(raw_path)
         
         if link_url_escaped != '#':
-            link_text = f'<link href="{link_url_escaped}" color="blue"><u>View Original Source Document (Dropbox)</u></link>'
+            # Provide the root link, then explicitly tell the user what filename to search for
+            link_text = f'<link href="{link_url_escaped}" color="blue"><u>Open Shared Folder (Root)</u></link>'
             story.append(Paragraph(link_text, styles['Normal']))
+            
             if raw_path_escaped:
-                # Add the raw path below the link so they know what to search for in Google Drive
-                story.append(Paragraph(f"<i><font size=8 color=dimgrey>File Path: {raw_path_escaped}</font></i>", styles['Normal']))
+                # Extract just the filename to make searching easier
+                filename = raw_path_escaped.split('/')[-1] if '/' in raw_path_escaped else raw_path_escaped
+                story.append(Paragraph(f"<i><font size=9 color=dimgrey>Search for File: <b>{filename}</b></font></i>", styles['Normal']))
+                story.append(Paragraph(f"<i><font size=8 color=silver>Full Path: {raw_path_escaped}</font></i>", styles['Normal']))
         else:
             story.append(Paragraph("<i>Source document link unavailable.</i>", styles['Normal']))
             
@@ -484,6 +487,7 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
+
 # ==========================================
 ### 2. DATA ACCESS LAYER ###
 # ==========================================
