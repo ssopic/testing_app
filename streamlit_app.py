@@ -397,6 +397,8 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
     if not document_facts:
         story.append(Paragraph("No detailed document facts were extracted in DIRECT mode or from the current query.", styles['Normal']))
 
+    official_gov_link = "https://oversight.house.gov/release/oversight-committee-releases-additional-epstein-estate-documents/"
+
     for doc_data in document_facts:
         # Bates Code
         story.append(Paragraph(f"<b>Document: {html.escape(doc_data['bates_code'])}</b>", styles['Heading3']))
@@ -405,31 +407,38 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         raw_input_link = str(doc_data.get('link', '#')).strip()
         raw_path = str(doc_data.get('raw_path', '')).strip()
         
-        # If the link is a relative path, we route to the root Dropbox folder 
-        # since Dropbox hashes its subdirectories (preventing direct deep-linking).
+        # Determine the routing 
         if raw_input_link != '#' and not raw_input_link.startswith('http'):
-            base_dropbox = "https://www.dropbox.com/scl/fo/9bq6uj0pnycpa4gxqiuzs/ABBA-BoYUAT7627MBeLiVYg?rlkey=3s6ggcjihou9nt8srsn2qt1n7&st=4aejaath&dl=0"
-            link_url = base_dropbox
-            
-            # Since the user passed a raw path as the link, ensure raw_path matches for the subtitle
+            # The user provided a raw path, link them to the Gov site
+            link_url = official_gov_link
             if not raw_path:
                 raw_path = raw_input_link
         else:
-            link_url = raw_input_link
+            # Fallback if there is no path or it's already an HTTP link
+            link_url = official_gov_link if raw_path else raw_input_link
 
         link_url_escaped = html.escape(link_url)
         raw_path_escaped = html.escape(raw_path)
         
-        if link_url_escaped != '#':
-            # Provide the root link, then explicitly tell the user what filename to search for
-            link_text = f'<link href="{link_url_escaped}" color="blue"><u>Open Shared Folder (Root)</u></link>'
+        if raw_path_escaped and not raw_path_escaped.startswith('http'):
+            # Strip the arbitrary root folder (e.g. HOUSE_OVERSIGHT_009/) to give them the clean Dropbox/Drive path
+            clean_path = re.sub(r'^HOUSE_OVERSIGHT_\d+/', '', raw_path_escaped).lstrip('/')
+            filename = clean_path.split('/')[-1] if '/' in clean_path else clean_path
+            
+            link_text = f'<link href="{link_url_escaped}" color="blue"><u>Official House Oversight Committee Repository</u></link>'
             story.append(Paragraph(link_text, styles['Normal']))
             
-            if raw_path_escaped:
-                # Extract just the filename to make searching easier
-                filename = raw_path_escaped.split('/')[-1] if '/' in raw_path_escaped else raw_path_escaped
-                story.append(Paragraph(f"<i><font size=9 color=dimgrey>Search for File: <b>{filename}</b></font></i>", styles['Normal']))
-                story.append(Paragraph(f"<i><font size=8 color=silver>Full Path: {raw_path_escaped}</font></i>", styles['Normal']))
+            # Formatted Instruction block
+            instructions = (
+                f"<i><font size=9 color=dimgrey>To verify this document:</font></i><br/>"
+                f"<i><font size=9 color=dimgrey>1. Click the link above and open the <b>Google Drive</b> or <b>Dropbox</b> backup.</font></i><br/>"
+                f"<i><font size=9 color=dimgrey>2. Navigate using path: <b>{clean_path}</b></font></i><br/>"
+            )
+            story.append(Paragraph(instructions, styles['Normal']))
+            
+        elif link_url_escaped != '#':
+            link_text = f'<link href="{link_url_escaped}" color="blue"><u>View Original Source Document</u></link>'
+            story.append(Paragraph(link_text, styles['Normal']))
         else:
             story.append(Paragraph("<i>Source document link unavailable.</i>", styles['Normal']))
             
@@ -1901,10 +1910,14 @@ def screen_analysis():
                     # Fetch link from the matched dataframe safely
                     df_row = matched[matched['Bates_Identity'] == bates_id]
                     link_url = "#"
+                    raw_path = ""
                     if not df_row.empty and 'Text Link' in df_row.columns:
                         val = df_row.iloc[0]['Text Link']
                         if pd.notna(val) and val != "":
-                            link_url = val
+                            raw_path = str(val).strip()
+                            # Pass the raw_path straight into the PDF generation buffer; 
+                            # The 'generate_analysis_report_pdf_buffer' logic will convert this to the .gov URL.
+                            link_url = raw_path 
                             
                     # Construct facts list for this doc
                     facts_list = [
@@ -1915,6 +1928,7 @@ def screen_analysis():
                     pdf_document_facts.append({
                         "bates_code": bates_id,
                         "link": link_url,
+                        "raw_path": raw_path,
                         "requires_human_review": doc_fact.requires_human_review,
                         "facts": facts_list
                     })
