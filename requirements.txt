@@ -9,3 +9,4 @@ langsmith
 qrcode==8.2
 opencv-python-headless==4.13.0.92
 pillow==11.3.0
+reportlab==4.4.10
