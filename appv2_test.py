@@ -10,6 +10,7 @@ from collections import defaultdict
 import concurrent.futures
 import math
 import io
+import asyncio
 
 # --- LangChain/Mistral/LLM Imports ---
 from langchain_mistralai import ChatMistralAI
@@ -32,7 +33,14 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 import zipfile
 
-import asyncio
+# ---Imports for pdf report generation ---
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Frame, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+import html
+
 # --- CRITICAL: CONFIGURE LANGSMITH BEFORE DEFINING CLASSES ---
 # This block must sit here, at the global level, right after imports.
 # It ensures the library picks up the config before the @traceable decorators run.
@@ -251,7 +259,248 @@ def flatten_ids(container):
 def get_rel_definition(rel_name):
     """Helper to safely get a definition or a default prompt."""
     return RELATIONSHIP_DEFINITIONS.get(rel_name, "Relationship connection between entities.")
+
+#######################
+# Additional chapter for the document generation
+######################
+def format_md_for_reportlab(text):
+    """
+    Safely converts basic LLM Markdown to ReportLab-compatible HTML.
+    Handles bold, italics, headers, bullets, and line breaks while escaping raw XML characters.
+    """
+    if not text: 
+        return ""
+        
+    # 1. Escape HTML/XML chars to prevent ReportLab crashes (e.g., <, >, &)
+    text = html.escape(text)
     
+    # 2. Convert literal newlines to ReportLab breaks
+    text = text.replace('\n', '<br/>')
+    
+    # 3. Horizontal rules (---) -> Visual break
+    text = re.sub(r'(?:<br/>\s*)*---+(?:\s*<br/>)*', r'<br/><br/>', text)
+    
+    # 4. Headers (e.g. ### Title) -> Convert the #s to breaks, let bolding handle emphasis
+    text = re.sub(r'(?:<br/>\s*)*#{1,6}\s+', r'<br/><br/>', text)
+    
+    # 5. Bold (**text**)
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    
+    # 6. Italics (*text* or _text_)
+    text = re.sub(r'(?<!\w)\*(.*?)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'\b_(.*?)_\b', r'<i>\1</i>', text)
+    
+    # 7. Bullets (Catch - or * at start of line/break)
+    text = re.sub(r'(?:<br/>|^)\s*[-*]\s+', r'<br/>&bull; ', text)
+    
+    # 8. Clean up excess consecutive breaks
+    text = re.sub(r'(<br/>\s*){3,}', '<br/><br/>', text)
+    text = re.sub(r'^(<br/>)+', '', text)
+    text = re.sub(r'(<br/>)+$', '', text)
+    
+    return text
+
+def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts, cypher_queries):
+    """
+    Generates a PDF analysis report and returns it as a bytes buffer 
+    for direct downloading in Streamlit.
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=72, leftMargin=72,
+                            topMargin=72, bottomMargin=18)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # --- CUSTOM STYLES ---
+    title_length = len(user_query)
+    calculated_size = max(24, min(60, int(800 / (title_length ** 0.6)))) # Dynamic sizing
+
+    huge_style = ParagraphStyle(
+        'HugeTitle',
+        parent=styles['Heading1'],
+        fontSize=calculated_size,
+        leading=calculated_size * 1.2,
+        alignment=1, # Center
+        spaceAfter=30
+    )
+
+    warning_style = ParagraphStyle(
+        'WarningStyle',
+        parent=styles['Normal'],
+        textColor=colors.firebrick,
+        fontSize=11,
+        leading=14,
+        spaceAfter=20,
+        spaceBefore=20,
+        borderColor=colors.firebrick,
+        borderWidth=1,
+        borderPadding=10,
+        backColor=colors.mistyrose
+    )
+
+    code_style = ParagraphStyle(
+        'CodeStyle',
+        parent=styles['Normal'],
+        fontName='Courier',
+        fontSize=9,
+        leading=12,
+        textColor=colors.black
+    )
+
+    # --- 1. COVER PAGE ---
+    story.append(Spacer(1, 1 * inch))
+    story.append(Paragraph("AI GRAPH ANALYSIS REPORT", styles['Heading2']))
+    story.append(Paragraph(f"<b>Query:</b> {html.escape(user_query)}", huge_style))
+    
+    # Mandatory LLM Hallucination Disclaimer
+    disclaimer_text = (
+        "<b>MANDATORY DISCLAIMER:</b><br/>"
+        "This document was generated using a Large Language Model (LLM) to extract and synthesize information from raw text. "
+        "Due to the inherent risk of AI hallucinations, fabricated relationships, or misinterpretations, "
+        "<b>all extracted facts MUST be viewed and verified through the original source document links</b> provided in this report "
+        "before drawing any conclusions."
+    )
+    story.append(Paragraph(disclaimer_text, warning_style))
+    story.append(PageBreak())
+
+    # --- 2. TABLE OF CONTENTS ---
+    story.append(Paragraph("Table of Contents", styles['Heading1']))
+    story.append(Spacer(1, 0.2 * inch))
+    
+    chapters = [
+        "1. Executive Summary (AI Synthesis)",
+        "2. Detailed Document Findings",
+        "3. Audit Trail: Queries & Methodology"
+    ]
+    
+    for chap in chapters:
+        story.append(Paragraph(chap, styles['Normal']))
+        story.append(Spacer(1, 0.1 * inch))
+    story.append(PageBreak())
+
+    # --- 3. CHAPTER 1: EXECUTIVE SUMMARY ---
+    story.append(Paragraph("Chapter 1: Executive Summary", styles['Heading1']))
+    story.append(Spacer(1, 0.2 * inch))
+    
+    # Apply Markdown Formatting to Final Answer
+    formatted_final_answer = format_md_for_reportlab(final_answer)
+    story.append(Paragraph(formatted_final_answer, styles['Normal']))
+    story.append(PageBreak())
+
+    # --- 4. CHAPTER 2: DETAILED DOCUMENT FINDINGS ---
+    story.append(Paragraph("Chapter 2: Detailed Document Findings", styles['Heading1']))
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(Paragraph("<i>The following facts were extracted autonomously. Please click the link above each fact to verify the original text.</i>", styles['Normal']))
+    story.append(Spacer(1, 0.3 * inch))
+
+    if not document_facts:
+        story.append(Paragraph("No detailed document facts were extracted in DIRECT mode or from the current query.", styles['Normal']))
+
+    official_gov_link = "https://oversight.house.gov/release/oversight-committee-releases-additional-epstein-estate-documents/"
+
+    for doc_data in document_facts:
+        # Bates Code
+        story.append(Paragraph(f"<b>Document: {html.escape(doc_data['bates_code'])}</b>", styles['Heading3']))
+        
+        # Link to Source Document processing
+        raw_input_link = str(doc_data.get('link', '#')).strip()
+        raw_path = str(doc_data.get('raw_path', '')).strip()
+        
+        # Determine the routing 
+        if raw_input_link != '#' and not raw_input_link.startswith('http'):
+            # The user provided a raw path, link them to the Gov site
+            link_url = official_gov_link
+            if not raw_path:
+                raw_path = raw_input_link
+        else:
+            # Fallback if there is no path or it's already an HTTP link
+            link_url = official_gov_link if raw_path else raw_input_link
+
+        link_url_escaped = html.escape(link_url)
+        raw_path_escaped = html.escape(raw_path)
+        
+        if raw_path_escaped and not raw_path_escaped.startswith('http'):
+            # Standardize slashes to forward slashes just in case, strip leading slashes FIRST, then strip the root folder
+            standardized_path = raw_path_escaped.replace('\\', '/').lstrip('/')
+            clean_path = re.sub(r'^HOUSE_OVERSIGHT_\d+/', '', standardized_path).lstrip('/')
+            filename = clean_path.split('/')[-1] if '/' in clean_path else clean_path
+            
+            # Format path with arrows for better readability
+            arrow_path = clean_path.replace('/', '-->')
+            
+            link_text = f'<link href="{link_url_escaped}" color="blue"><u>Official House Oversight Committee Repository</u></link>'
+            story.append(Paragraph(link_text, styles['Normal']))
+            
+            # Formatted Instruction block
+            instructions = (
+                f"<i><font size=9 color=dimgrey>To verify this document:</font></i><br/>"
+                f"<i><font size=9 color=dimgrey>1. Click the link above and open the <b>Google Drive</b> or <b>Dropbox</b> backup.</font></i><br/>"
+                f"<i><font size=9 color=dimgrey>2. Navigate using path: <b>{arrow_path}</b></font></i><br/>"
+            )
+            story.append(Paragraph(instructions, styles['Normal']))
+            
+        elif link_url_escaped != '#':
+            link_text = f'<link href="{link_url_escaped}" color="blue"><u>View Original Source Document</u></link>'
+            story.append(Paragraph(link_text, styles['Normal']))
+        else:
+            story.append(Paragraph("<i>Source document link unavailable.</i>", styles['Normal']))
+            
+        story.append(Spacer(1, 0.05 * inch))
+        
+        # Compliance Warning if the MapReduce Engine flagged it
+        if doc_data.get('requires_human_review'):
+            story.append(Paragraph("<b>🚨 COMPLIANCE ALERT:</b> Contains unresolved fragments. Human review of source required.", ParagraphStyle('Alert', parent=warning_style, fontSize=10, leading=12, spaceAfter=10, spaceBefore=5)))
+
+        # Extracted Facts & Quotes
+        for fact in doc_data.get('facts', []):
+            formatted_fact = format_md_for_reportlab(fact['summary'])
+            story.append(Paragraph(f"<b>Extracted Fact:</b> {formatted_fact}", styles['Normal']))
+            for quote in fact.get('quotes', []):
+                formatted_quote = format_md_for_reportlab(quote)
+                story.append(Paragraph(f"<i>\"{formatted_quote}\"</i>", ParagraphStyle('Quote', parent=styles['Normal'], leftIndent=20, spaceBefore=2)))
+            story.append(Spacer(1, 0.15 * inch))
+            
+        story.append(Spacer(1, 0.2 * inch))
+
+    story.append(PageBreak())
+
+    # --- 5. CHAPTER 3: AUDIT TRAIL (LAST PAGE) ---
+    story.append(Paragraph("Chapter 3: Audit Trail", styles['Heading1']))
+    story.append(Spacer(1, 0.2 * inch))
+    
+    # Repeat the title/query to ensure no manipulation is hidden
+    story.append(Paragraph("<b>Original Analyst Query (Report Title):</b>", styles['Heading3']))
+    story.append(Paragraph(html.escape(user_query), styles['Normal']))
+    story.append(Spacer(1, 0.3 * inch))
+    
+    # Cypher Queries Used
+    story.append(Paragraph("<b>Database Queries Executed (Cypher):</b>", styles['Heading3']))
+    story.append(Paragraph("<i>The following graph queries were used to retrieve the underlying documents. Any targeted manipulation or specific filtering applied by the user will be visible below.</i>", styles['Normal']))
+    story.append(Spacer(1, 0.1 * inch))
+
+    # Formatting the Cypher queries in a Code Block
+    combined_cypher = "<br/><br/>".join(cypher_queries) if cypher_queries else "No specific Cypher queries were captured."
+    # Make sure to escape Cypher so less-than/greater-than signs (<, >) don't crash ReportLab
+    escaped_cypher = html.escape(combined_cypher).replace("\n", "<br/>")
+    code_paragraph = Paragraph(escaped_cypher, code_style)
+
+    data = [[code_paragraph]]
+    table = Table(data, colWidths=[6.5 * inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
+        ('BORDER', (0, 0), (-1, -1), 1, colors.dimgrey),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('PADDING', (0, 0), (-1, -1), 10),
+    ]))
+
+    story.append(table)
+    
+    # Build the PDF to buffer
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 # ==========================================
 ### 2. DATA ACCESS LAYER ###
 # ==========================================
@@ -1371,7 +1620,7 @@ def screen_extraction():
         st.caption("*NOTE: The evidence output might have direction issues. In example if you ask for outgoing communication you might (also) get incoming. Prefer asking for communication in general to obtain both sides and filter later. *")
         st.caption("*Make sure to view the evidence before making conclusions.*")
 
-        user_msg = st.chat_input("Ask about the graph...")
+        user_msg = st.chat_input("Which documents are you looking for...?")
         if user_msg:
             # Update app_state chat history
             st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
@@ -1422,7 +1671,7 @@ def screen_extraction():
         
         if st.button("Run Query"):
             if SAFETY_REGEX.search(cypher_input):
-                st.error("🚨 SECURITY ALERT: destructive commands are not allowed.")
+                st.error("SECURITY ALERT: destructive commands are not allowed.")
             else:
                 creds = st.session_state.app_state["neo4j_creds"]
                 driver = get_cached_driver(creds["uri"], creds["auth"])
@@ -1609,14 +1858,11 @@ def screen_analysis():
                         loop = None
                         
                     if loop and loop.is_running():
-                        # If Streamlit is polluting the thread with an active loop, isolate via ThreadPool
                         with concurrent.futures.ThreadPoolExecutor(1) as pool:
                             return pool.submit(lambda: asyncio.run(coroutine)).result()
                     else:
-                        # Standard pristine async run
                         return asyncio.run(coroutine)
 
-                # Execute the new async pipeline
                 facts = safe_async_run(engine.arun_parallel_map(docs_payload, extraction_goal, status_container=status))
                 
                 status.update(label="Pass 3: Synthesizing Final Answer...", state="running")
@@ -1630,7 +1876,9 @@ def screen_analysis():
             "facts": facts
         }
 
-    # Display Result & Citations
+    # =========================================================
+    # DISPLAY RESULT & EXPORT CONTAINERS
+    # =========================================================
     if st.session_state.get("last_analysis"):
         analysis_data = st.session_state.last_analysis
         st.info(analysis_data["final_answer"])
@@ -1639,8 +1887,6 @@ def screen_analysis():
             with st.expander("View Source Citations & Compliance Warnings"):
                 for doc in analysis_data["facts"]:
                     st.markdown(f"**Document: {doc.internal_doc_id}**")
-                    
-                    # Display Compliance Alert if needed
                     if doc.requires_human_review:
                         st.error("🚨 COMPLIANCE ALERT: This document contained split/fragmented thoughts that the AI could not resolve. Human review of the raw text is required.")
                     
@@ -1649,92 +1895,154 @@ def screen_analysis():
                         for quote in fact.supporting_quotes:
                             st.text(f"\"{quote}\"")
                     st.divider()
-        st.write("### 🔗 Share Analysis (QR Code)")
-        
-        qr_presets = {
-            "Raw Data / Full Quality (Archive)": "RAW",
-            "Instagram / TikTok Story (1080 x 1920)": (1080, 1920),
-            "Square Feed Post (1080 x 1080)": (1080, 1080),
-            "X / LinkedIn Post (1200 x 675)": (1200, 675)
-        }
-        
-        # --- FIX: We bind the on_change callback here to clear old images ---
-        selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()), on_change=clear_qr_cache)
-        
-        # Add the text input here! Max_chars strictly enforces the UI limit
-        custom_title = st.text_input("QR Code Title:", value="Graph Analysis", max_chars=22, on_change=clear_qr_cache)
-        
-        if st.button("Generate QR Code(s)", type="primary"):
-            clear_qr_cache() 
+
+        st.divider()
+
+        # ---------------------------------------------------------
+        # EXPORT CONTAINER 1: FULL PDF REPORT
+        # ---------------------------------------------------------
+        with st.container(border=True):
+            st.subheader("📄 Export Full PDF Report")
+            st.write("Generate a comprehensive, immutable PDF containing the findings, verified links, and an audit trail of your queries.")
             
-            queries = get_selected_cypher_queries()
-            if queries:
-                try:
-                    with st.spinner(f"Generating verified QR batch ({selected_preset})..."):
-                        qr_master = SocialQRMaster()
-                        
-                        is_raw = qr_presets[selected_preset] == "RAW"
-                        w, h = (1080, 1080) if is_raw else qr_presets[selected_preset]
-                        
-                        img_list = qr_master.generate_batch(
-                            queries=queries, 
-                            title=custom_title,   # <--- Change this to use the new custom_title variable
-                            instruction=analysis_data["q"],
-                            fill_color="#000000",
-                            back_color="#FFFFFF",
-                            width=w,
-                            height=h,
-                            app_address="silvios.ai",
-                            raw_export=is_raw
-                        )
-                        
-                        st.session_state.generated_qr_batch = []
-                        for img in img_list:
-                            buf = io.BytesIO()
-                            img.save(buf, format="PNG")
-                            st.session_state.generated_qr_batch.append(buf.getvalue())
+            # Extract formatted facts from the state and the dataframe for the PDF
+            pdf_document_facts = []
+            if analysis_data["strategy"] == "MAP_REDUCE" and analysis_data.get("facts"):
+                for doc_fact in analysis_data["facts"]:
+                    bates_id = doc_fact.internal_doc_id
+                    
+                    # Fetch link from the matched dataframe safely
+                    df_row = matched[matched['Bates_Identity'] == bates_id]
+                    link_url = "#"
+                    raw_path = ""
+                    if not df_row.empty and 'Text Link' in df_row.columns:
+                        val = df_row.iloc[0]['Text Link']
+                        if pd.notna(val) and val != "":
+                            raw_path = str(val).strip()
+                            # Pass the raw_path straight into the PDF generation buffer; 
+                            # The 'generate_analysis_report_pdf_buffer' logic will convert this to the .gov URL.
+                            link_url = raw_path 
                             
-                        st.session_state.generated_qr_size = f"{img_list[0].width}x{img_list[0].height}"
-                        
-                except Exception as e:
-                    st.error(f"Failed to generate QR: {e}")
-            else:
-                st.warning("No Cypher queries found in the selected evidence to share.")
+                    # Construct facts list for this doc
+                    facts_list = [
+                        {"summary": f.merged_summary, "quotes": f.supporting_quotes} 
+                        for f in doc_fact.verified_facts
+                    ]
+                    
+                    pdf_document_facts.append({
+                        "bates_code": bates_id,
+                        "link": link_url,
+                        "raw_path": raw_path,
+                        "requires_human_review": doc_fact.requires_human_review,
+                        "facts": facts_list
+                    })
+
+            # Fetch the actual Cypher queries from the cart
+            cypher_queries = get_selected_cypher_queries()
+
+            # Generate the PDF Buffer on the fly
+            pdf_bytes = generate_analysis_report_pdf_buffer(
+                user_query=analysis_data["q"],
+                final_answer=analysis_data["final_answer"],
+                document_facts=pdf_document_facts,
+                cypher_queries=cypher_queries
+            )
+
+            st.download_button(
+                label="⬇️ Download PDF Report",
+                data=pdf_bytes,
+                file_name="AI_Graph_Analysis_Report.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+
+        # ---------------------------------------------------------
+        # EXPORT CONTAINER 2: SOCIAL QR CODES
+        # ---------------------------------------------------------
+        with st.container(border=True):
+            st.subheader("🔗 Share Analysis (QR Code)")
+            
+            qr_presets = {
+                "Raw Data / Full Quality (Archive)": "RAW",
+                "Instagram / TikTok Story (1080 x 1920)": (1080, 1920),
+                "Square Feed Post (1080 x 1080)": (1080, 1080),
+                "X / LinkedIn Post (1200 x 675)": (1200, 675)
+            }
+            
+            selected_preset = st.selectbox("Select Target Platform / Image Size:", list(qr_presets.keys()), on_change=clear_qr_cache)
+            custom_title = st.text_input("QR Code Title:", value="Graph Analysis", max_chars=22, on_change=clear_qr_cache)
+            
+            if st.button("Generate QR Code(s)", type="primary"):
+                clear_qr_cache() 
                 
-        if "generated_qr_batch" in st.session_state:
-            images = st.session_state.generated_qr_batch
-            total_images = len(images)
-            
-            st.success(f"Generated {total_images} QR code(s) successfully!")
-            
-            if total_images > 1:
-                zip_buffer = io.BytesIO()
-                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                    for i, img_bytes in enumerate(images):
-                        zip_file.writestr(f"graph_analysis_part_{i+1}_of_{total_images}.png", img_bytes)
+                queries = get_selected_cypher_queries()
+                if queries:
+                    try:
+                        with st.spinner(f"Generating verified QR batch ({selected_preset})..."):
+                            qr_master = SocialQRMaster()
+                            
+                            is_raw = qr_presets[selected_preset] == "RAW"
+                            w, h = (1080, 1080) if is_raw else qr_presets[selected_preset]
+                            
+                            img_list = qr_master.generate_batch(
+                                queries=queries, 
+                                title=custom_title,
+                                instruction=analysis_data["q"],
+                                fill_color="#000000",
+                                back_color="#FFFFFF",
+                                width=w,
+                                height=h,
+                                app_address="silvios.ai",
+                                raw_export=is_raw
+                            )
+                            
+                            st.session_state.generated_qr_batch = []
+                            for img in img_list:
+                                buf = io.BytesIO()
+                                img.save(buf, format="PNG")
+                                st.session_state.generated_qr_batch.append(buf.getvalue())
+                                
+                            st.session_state.generated_qr_size = f"{img_list[0].width}x{img_list[0].height}"
+                            
+                    except Exception as e:
+                        st.error(f"Failed to generate QR: {e}")
+                else:
+                    st.warning("No Cypher queries found in the selected evidence to share.")
+                    
+            if "generated_qr_batch" in st.session_state:
+                images = st.session_state.generated_qr_batch
+                total_images = len(images)
                 
-                st.download_button(
-                    label="📦 Download Complete Archive (ZIP)",
-                    data=zip_buffer.getvalue(),
-                    file_name="graph_analysis_qrs.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                    type="primary"
-                )
-                st.write("Or download images individually below:")
-            
-            cols = st.columns(total_images if total_images <= 4 else 4)
-            for i, img_bytes in enumerate(images):
-                with cols[i % 4]:
-                    st.image(img_bytes, caption=f"Part {i+1} of {total_images}")
+                st.success(f"Generated {total_images} QR code(s) successfully!")
+                
+                if total_images > 1:
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                        for i, img_bytes in enumerate(images):
+                            zip_file.writestr(f"graph_analysis_part_{i+1}_of_{total_images}.png", img_bytes)
+                    
                     st.download_button(
-                        label=f"⬇️ Download Part {i+1}",
-                        data=img_bytes,
-                        file_name=f"graph_analysis_{st.session_state.generated_qr_size}_part{i+1}.png",
-                        mime="image/png",
+                        label="📦 Download Complete Archive (ZIP)",
+                        data=zip_buffer.getvalue(),
+                        file_name="graph_analysis_qrs.zip",
+                        mime="application/zip",
                         use_container_width=True,
-                        key=f"dl_btn_{i}"
+                        type="primary"
                     )
+                    st.write("Or download images individually below:")
+                
+                cols = st.columns(total_images if total_images <= 4 else 4)
+                for i, img_bytes in enumerate(images):
+                    with cols[i % 4]:
+                        st.image(img_bytes, caption=f"Part {i+1} of {total_images}")
+                        st.download_button(
+                            label=f"⬇️ Download Part {i+1}",
+                            data=img_bytes,
+                            file_name=f"graph_analysis_{st.session_state.generated_qr_size}_part{i+1}.png",
+                            mime="image/png",
+                            use_container_width=True,
+                            key=f"dl_btn_{i}"
+                        )
 #teh process_imorted_qr can be moved to the helper functions part    
 
 def process_imported_qr(queries, instruction, analyze_now):
@@ -1901,7 +2209,7 @@ def render_explorer_workspace(selector_type, selected_items):
     
     with c_mid:
         if not selected_items:
-            st.info("👈 Select entities from the left and click 'Show Data'.")
+            st.info("Select entities from the left and click 'Show Data'.")
             return
 
         names = [item['name'] for item in selected_items]
@@ -1911,15 +2219,15 @@ def render_explorer_workspace(selector_type, selected_items):
             # Hierarchy: Edge (Gray) -> Source (Amber) -> Target (Teal)
             legend_items = [
                 (COLOR_RELATIONSHIP, "Relationship", "Layer 1: The Connection (Root)", "border: 1px solid #666;"),
-                (COLOR_ROOT, "Subject (🟠)", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
-                (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+                (COLOR_ROOT, "Subject", "Layer 2: The Source Entity", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
+                (COLOR_TARGET, "Object Type", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
             ]
         else:
             # Hierarchy: Name (Amber) -> Edge (Gray) -> Target (Teal)
             legend_items = [
                 (COLOR_ROOT, "Subject", "Layer 1: The Source Entity (Root)", "box-shadow: 0 0 5px " + COLOR_ROOT + ";"),
-                (COLOR_RELATIONSHIP, "Relationship (⬜)", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
-                (COLOR_TARGET, "Object Type (🟦)", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
+                (COLOR_RELATIONSHIP, "Connection ", "Layer 2: The Action/Connection", "border: 1px solid #666;"),
+                (COLOR_TARGET, "Target Type ", "Layer 3: The Target Entity", "box-shadow: 0 0 5px " + COLOR_TARGET + ";")
             ]
             
         legend_html = '<div style="display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; justify-content: center;">'
@@ -2136,7 +2444,7 @@ def render_explorer_workspace(selector_type, selected_items):
             st.caption("Filter by Relationships and Target Types")
 
             raw_edges = sorted(df['edge'].unique()) if 'edge' in df.columns else []
-            edge_options = [f"⬜ {e}" for e in raw_edges]
+            edge_options = [f" {e}" for e in raw_edges]
             
             selected_edges_fmt = st.multiselect(
                 "Filter by Connection Type:",
@@ -2154,7 +2462,7 @@ def render_explorer_workspace(selector_type, selected_items):
                 
             if 'connected_node_label' in filtered_df_step1.columns:
                 raw_targets = sorted(filtered_df_step1['connected_node_label'].unique())
-                target_options = [f"🟦 {t}" for t in raw_targets]
+                target_options = [f" {t}" for t in raw_targets]
 
                 selected_targets_fmt = st.multiselect(
                     "Filter by Target Type:",
@@ -2794,7 +3102,7 @@ Output:
 You are a helpful Data Analyst / Investigator. Your goal is to answer the user's question directly based on the database results.
 
 GUIDELINES:
-1. **ANSWER FIRST**: Start immediately with the findings. Do NOT explain the Cypher query structure (e.g., "I matched a Person node...") unless the results are ambiguous and require technical context.
+1. **ANSWER FIRST**: Start immediately with the findings. Do not forget that you do not see the documents themselves, just the document ids. Do NOT explain the Cypher query structure (e.g., "I matched a Person node...") unless the results are ambiguous and require technical context.
    - Clearly admit the limitations of the cypher. The database does not allow for filtering on the names of anything other than Persons. If a name of an island or organization is being used, clearly state
    that it might extract non relevant data as a precaution to make sure that the relevant data is extracted. 
    - YES: "I found 36 individuals who fit the criteria, including..."
