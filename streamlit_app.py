@@ -1620,7 +1620,7 @@ def screen_extraction():
         st.caption("*NOTE: The evidence output might have direction issues. In example if you ask for outgoing communication you might (also) get incoming. Prefer asking for communication in general to obtain both sides and filter later. *")
         st.caption("*Make sure to view the evidence before making conclusions.*")
 
-        user_msg = st.chat_input("Ask about the graph...")
+        user_msg = st.chat_input("Which documents are you looking for...?")
         if user_msg:
             # Update app_state chat history
             st.session_state.app_state["chat_history"].append({"role": "user", "content": user_msg})
