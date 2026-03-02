@@ -283,12 +283,12 @@ def format_md_for_reportlab(text):
     # 4. Headers (e.g. ### Title) -> Convert the #s to breaks, let bolding handle emphasis
     text = re.sub(r'(?:<br/>\s*)*#{1,6}\s+', r'<br/><br/>', text)
     
-    # 5. Bold (**text**)
-    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    # 5. Bold (**text**) - UPDATED: [^<]*? prevents overlapping HTML tags
+    text = re.sub(r'\*\*([^<]*?)\*\*', r'<b>\1</b>', text)
     
-    # 6. Italics (*text* or _text_)
-    text = re.sub(r'(?<!\w)\*(.*?)\*(?!\w)', r'<i>\1</i>', text)
-    text = re.sub(r'\b_(.*?)_\b', r'<i>\1</i>', text)
+    # 6. Italics (*text* or _text_) - UPDATED: [^<]*? prevents overlapping HTML tags
+    text = re.sub(r'(?<!\w)\*([^<]*?)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'\b_([^<]*?)_\b', r'<i>\1</i>', text)
     
     # 7. Bullets (Catch - or * at start of line/break)
     text = re.sub(r'(?:<br/>|^)\s*[-*]\s+', r'<br/>&bull; ', text)
@@ -299,6 +299,7 @@ def format_md_for_reportlab(text):
     text = re.sub(r'(<br/>)+$', '', text)
     
     return text
+
 
 def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts, cypher_queries):
     """
@@ -455,10 +456,27 @@ def generate_analysis_report_pdf_buffer(user_query, final_answer, document_facts
         # Extracted Facts & Quotes
         for fact in doc_data.get('facts', []):
             formatted_fact = format_md_for_reportlab(fact['summary'])
-            story.append(Paragraph(f"<b>Extracted Fact:</b> {formatted_fact}", styles['Normal']))
+            
+            # Safe rendering for Facts
+            try:
+                story.append(Paragraph(f"<b>Extracted Fact:</b> {formatted_fact}", styles['Normal']))
+            except ValueError:
+                # Fallback: Strip formatting tags if ReportLab parser fails
+                clean_fact = formatted_fact.replace('<b>', '').replace('</b>', '').replace('<i>', '').replace('</i>', '')
+                story.append(Paragraph(f"<b>Extracted Fact:</b> {clean_fact}", styles['Normal']))
+
             for quote in fact.get('quotes', []):
                 formatted_quote = format_md_for_reportlab(quote)
-                story.append(Paragraph(f"<i>\"{formatted_quote}\"</i>", ParagraphStyle('Quote', parent=styles['Normal'], leftIndent=20, spaceBefore=2)))
+                
+                # Safe rendering for Quotes
+                quote_style = ParagraphStyle('Quote', parent=styles['Normal'], leftIndent=20, spaceBefore=2)
+                try:
+                    story.append(Paragraph(f"<i>\"{formatted_quote}\"</i>", quote_style))
+                except ValueError:
+                    # Fallback: Strip formatting tags if ReportLab parser fails
+                    clean_quote = formatted_quote.replace('<b>', '').replace('</b>', '').replace('<i>', '').replace('</i>', '')
+                    story.append(Paragraph(f"<i>\"{clean_quote}\"</i>", quote_style))
+                    
             story.append(Spacer(1, 0.15 * inch))
             
         story.append(Spacer(1, 0.2 * inch))
